@@ -80,6 +80,7 @@ _G.PassExternalVisible = false -- Visibility eksternal tombol oper bom
 _G.RangeChaseEnabled = false
 _G.RangeChaseValue = 30
 _G.TripEnabled = false
+_G.TripFreezeDelay = 0.25 -- Variabel baru untuk jeda waktu trip freeze
 _G.WallAvoidEnabled = false
 _G.WallAvoidMethod = "Jump" -- "Jump" atau "Avoid"
 
@@ -318,7 +319,7 @@ local function CreateRangeVisual()
     RangeVisualPart.Parent = workspace
 end
 
--- Sistem Trip / Fall Over (Gaya Infinite Yield) + Auto Freeze (0.25 Detik)
+-- Sistem Trip / Fall Over (Gaya Infinite Yield) + Auto Freeze (Dynamic Delay)
 local function ApplyTrip(state)
     local char = LocalPlayer.Character
     if not char then return end
@@ -349,7 +350,7 @@ local function ApplyTrip(state)
         
         -- >>> LOGIKA FREEZE SAAT JATUH <<<
         task.spawn(function()
-            task.wait(0.25) -- Jeda 0.25 detik agar karakter menyentuh tanah terlebih dahulu sebelum di-freeze
+            task.wait(_G.TripFreezeDelay or 0.25) -- Jeda dinamis agar karakter menyentuh tanah terlebih dahulu sebelum di-freeze
             if _G.TripEnabled and LocalPlayer.Character == char then
                 for _, part in ipairs(char:GetDescendants()) do
                     if part:IsA("BasePart") then
@@ -1575,6 +1576,11 @@ TabMovement:CreateToggle("Enable Trip Fall", false, "TripEnabled", function(stat
     else
         SafeSetText(_G.ExtTripBtn, "TRIP FALL")
     end
+end)
+
+-- SLIDER DURASI FREEZE PADA TRIP FALL (0.25 Detik sampai 2.0 Detik)
+TabMovement:CreateSlider("Trip Freeze Delay (x100 ms)", 25, 200, 25, "TripFreezeDelayScale", function(val)
+    _G.TripFreezeDelay = val / 100
 end)
 
 -- INTEGRASI FITUR DETEKSI DINDING (WALL AVOIDANCE) DI TAB MOVEMENT
