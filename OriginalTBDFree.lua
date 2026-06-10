@@ -318,7 +318,7 @@ local function CreateRangeVisual()
     RangeVisualPart.Parent = workspace
 end
 
--- Sistem Trip / Fall Over (Gaya Infinite Yield)
+-- Sistem Trip / Fall Over (Gaya Infinite Yield) + Auto Freeze (0.25 Detik)
 local function ApplyTrip(state)
     local char = LocalPlayer.Character
     if not char then return end
@@ -346,7 +346,26 @@ local function ApplyTrip(state)
         pcall(function()
             hrp.CFrame = hrp.CFrame * CFrame.Angles(math.rad(30), 0, 0)
         end)
+        
+        -- >>> LOGIKA FREEZE SAAT JATUH <<<
+        task.spawn(function()
+            task.wait(0.25) -- Jeda 0.25 detik agar karakter menyentuh tanah terlebih dahulu sebelum di-freeze
+            if _G.TripEnabled and LocalPlayer.Character == char then
+                for _, part in ipairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.Anchored = true
+                    end
+                end
+            end
+        end)
     else
+        -- >>> LOGIKA UNFREEZE SAAT DINONAKTIFKAN <<<
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.Anchored = false
+            end
+        end
+        
         -- Kembalikan kontrol gerak dan paksa karakter untuk berdiri kembali
         hum:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
         hum:ChangeState(Enum.HumanoidStateType.GettingUp)
