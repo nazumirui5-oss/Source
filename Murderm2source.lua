@@ -566,21 +566,15 @@ pcall(function()
         local method = getnamecallmethod()
         local args = {...}
         if not checkcaller() and Settings.SilentAimEnabled then
-            -- SPESIFIK HOOK: Mencegat RemoteEvent "Shoot" yang berada di dalam Tool "Gun"
-            if method == "FireServer" and self:IsA("RemoteEvent") and self.Name == "Shoot" and self.Parent and self.Parent:IsA("Tool") and self.Parent.Name == "Gun" then
+            -- SPESIFIK HOOK: Mencegat RemoteEvent "Shoot"
+            if method == "FireServer" and tostring(self) == "Shoot" then
                 local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
                 local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-                local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                 
-                if targetPart and myRoot then
-                    local origin = myRoot.Position
-                    local targetPos = targetPart.Position
-                    
-                    -- args[1] diubah menjadi CFrame asal yang dipaksa menghadap ke tubuh target (melewati bypass sudut server)
-                    args[1] = CFrame.lookAt(origin, targetPos)
-                    
-                    -- args[2] diubah menjadi CFrame letak koordinat target berada (peluru 100% mendarat di tubuh target)
-                    args[2] = CFrame.new(targetPos)
+                if targetPart then
+                    -- args[1] (Origin CFrame) dibiarkan ASLI agar lolos verifikasi jarak oleh server-side anti-cheat.
+                    -- Kita hanya membelokkan args[2] (Destination CFrame) menuju target.
+                    args[2] = CFrame.new(targetPart.Position)
                     
                     return oldNamecall(self, unpack(args))
                 end
@@ -1652,7 +1646,7 @@ task.spawn(function()
                 local targetRole = Settings.AutoFlingMurder and "Murderer" or "Sheriff"
                 local targetPlayer = GetTargetByRole(targetRole)
 
-                if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                if targetPlayer and targetPlayer.Character wins targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
                     if not FlingFailsafeActive then
                         FlingFailsafeActive = true
                         OriginalCFrameBeforeFling = root.CFrame
