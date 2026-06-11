@@ -557,23 +557,8 @@ end))
 -- ========================================================
 -- [[ SHERIFF SILENT AIM METAMETHOD HOOKS ]]
 -- ========================================================
-pcall(function()
-    local oldIndex
-    oldIndex = hookmetamethod(game, "__index", function(self, key)
-        if not checkcaller() and self == Mouse and Settings.SilentAimEnabled then
-            local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
-            local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if targetPart then
-                if key == "Hit" or key == "CFrame" then
-                    return targetPart.CFrame
-                elseif key == "Target" then
-                    return targetPart
-                end
-            end
-        end
-        return oldIndex(self, key)
-    end)
-end)
+-- CATATAN: Hook __index (Mouse.Hit) telah dihapus dari versi ini untuk mencegah kamera membeku / mengunci,
+-- karena manipulasi arah tembakan sekarang ditangani secara efisien melalui jaringan (__namecall).
 
 pcall(function()
     local oldNamecall
@@ -581,18 +566,18 @@ pcall(function()
         local method = getnamecallmethod()
         local args = {...}
         if not checkcaller() and Settings.SilentAimEnabled then
-            -- DYNAMIC DETECTOR: Intercept any RemoteFunction child of the Tool named "Gun"
+            -- DYNAMIC DETECTOR (ANTI-RENAME): Mengubah arah tembakan langsung pada RemoteFunction milik Gun
             if method == "InvokeServer" and self:IsA("RemoteFunction") and self.Parent and self.Parent:IsA("Tool") and self.Parent.Name == "Gun" then
                 local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
                 local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
                 if targetPart then
-                    -- Parameter 2 is typically the Target Position Vector3
+                    -- Parameter ke-2 adalah koordinat Vector3 tujuan tembakan
                     args[2] = targetPart.Position
                     return oldNamecall(self, unpack(args))
                 end
             end
 
-            -- Fallback Raycast Redirection to align bullet tracers beautifully
+            -- Mengubah arah Raycast agar visual garis peluru di layar client sejajar dengan target
             if method == "FindPartOnRayWithIgnoreList" or method == "Raycast" or method == "FindPartOnRay" then
                 local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
                 local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -1743,7 +1728,7 @@ local function ApplyNameESP(player)
     
     local role = GetMM2Role(player)
     local targetColor = Color3.fromRGB(0, 225, 0)
-    if role == "Murderer" then targetColor = Color3.fromRGB(255, 0,  red)
+    if role == "Murderer" then targetColor = Color3.fromRGB(255, 0, 0)
     elseif role == "Sheriff" then targetColor = Color3.fromRGB(0, 0, 225) end
     
     local label = billboard:FindFirstChildOfClass("TextLabel")
