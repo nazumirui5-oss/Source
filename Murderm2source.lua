@@ -37,6 +37,7 @@ local CollectedCoinsCount = 0
 local CoinFarmTimeLeft = 60
 local IsFlingingFromFarm = false
 local FlingDurationLeft = 12
+local lastShotTime = 0
 
 -- ========================================================================
 -- [[ EXTERNAL BUTTON TEXT CUSTOMIZATION ]]
@@ -62,7 +63,7 @@ local ExtButtonTexts = {
 
 -- ========================================================================
 -- [[ EXTERNAL UTILITY BUTTONS & SCALE ENGINE ]]
--- ========================================================
+-- ========================================================================
 local ExternalButtonsList = {}
 
 local function RegisterExternalButton(btnWrapper)
@@ -171,7 +172,8 @@ local Settings = {
     JumpBoostEnabled = false,
     JumpBoostValue = 35,
     SilentAimEnabled = false,
-    SilentAimExtEnabled = false
+    SilentAimExtEnabled = false,
+    AutoShootEnabled = false -- Fitur Tembak Otomatis
 }
 
 local OriginalFOV = Camera.FieldOfView
@@ -554,13 +556,64 @@ SafeConnect(RunService.RenderStepped, LPH_NO_VIRTUALIZE(function()
     end
 end))
 
--- ========================================================
--- [[ SHERIFF SILENT AIM REMOTEFUNCTION HOOKS ]]
--- ========================================================
--- Menggunakan hook langsung pada level fungsi RemoteEvent & RemoteFunction bawaan Roblox (hookfunction).
--- Ini jauh lebih cepat, dijamin tidak merusak skrip kamera bawaan, dan bebas dari error macet tembak (silent drops).
+-- ========================================================================
+-- [[ UNIVERSAL SHERIFF FIRE & SILENT AIM ENGINE ]]
+-- ========================================================================
+-- Fungsi pembantu penembak jitu universal. Memakai jalur pintas jaringan (Remote Bypass)
+-- untuk menembak target langsung dari server secara instan dan akurat.
+local function FireGunAtTarget()
+    local char = LocalPlayer.Character
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    local gun = char and char:FindFirstChild("Gun") or (backpack and backpack:FindFirstChild("Gun"))
+    
+    if not gun then
+        Library:Notify("Silent Aim", "Pistol tidak ditemukan di tas atau karakter.", 2)
+        return
+    end
+    
+    local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
+    local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local myRoot = char and char:FindFirstChild("HumanoidRootPart")
+    
+    if not targetPart or not myRoot then
+        Library:Notify("Silent Aim", "Target Murderer tidak ditemukan.", 2)
+        return
+    end
+    
+    -- Jeda Cooldown tembakan manual/otomatis agar tidak dianggap spam oleh server
+    if os.clock() - lastShotTime < 0.35 then return end
+    lastShotTime = os.clock()
+    
+    -- Auto-Equip Pistol jika masih ada di Backpack
+    if gun.Parent == backpack then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum:EquipTool(gun)
+            task.wait(0.05) -- Beri jeda sangat singkat agar server meregistrasikan status equip
+        else
+            gun.Parent = char
+            task.wait(0.05)
+        end
+    end
+    
+    local shootRemote = gun:FindFirstChild("Shoot") -- Custom / Sandbox MM2 (RemoteEvent)
+    local shootGunRemote = gun:FindFirstChild("ShootGun") -- Original MM2 (RemoteFunction)
+    
+    if shootRemote and shootRemote:IsA("RemoteEvent") then
+        shootRemote:FireServer(myRoot.CFrame, CFrame.new(targetPart.Position))
+        Library:Notify("Silent Aim", "Menembak (Sandbox) -> " .. targetPlayer.DisplayName, 1.5)
+    elseif shootGunRemote and shootGunRemote:IsA("RemoteFunction") then
+        shootGunRemote:InvokeServer(1, targetPart.Position, "AH2")
+        Library:Notify("Silent Aim", "Menembak (Original) -> " .. targetPlayer.DisplayName, 1.5)
+    else
+        Library:Notify("Silent Aim", "Remote tembakan tidak terdeteksi di dalam Pistol.", 2)
+    end
+end
 
--- 1. Hook untuk MM2 Modded / Sandbox (RemoteEvent "Shoot")
+-- ========================================================
+-- [[ METAMETHOD FIRE & INVOKE HOOKS (PERSISTENT PASSIVE) ]]
+-- ========================================================
+-- Hook ini mengamankan tembakan manual Anda saat mengeklik layar biasa agar pelurunya ikut berbelok secara pasif.
 pcall(function()
     local OldFireServer
     OldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
@@ -570,8 +623,6 @@ pcall(function()
                 local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
                 local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
                 if targetPart then
-                    -- Mengubah target koordinat (args[2]) secara sah ke posisi target.
-                    -- args[1] (asal/origin) dibiarkan murni bawaan pistol agar lolos anti-cheat jarak.
                     args[2] = CFrame.new(targetPart.Position)
                     return OldFireServer(self, unpack(args))
                 end
@@ -581,7 +632,6 @@ pcall(function()
     end)
 end)
 
--- 2. Hook untuk MM2 Original (RemoteFunction "ShootGun")
 pcall(function()
     local OldInvokeServer
     OldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
@@ -591,7 +641,6 @@ pcall(function()
                 local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
                 local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
                 if targetPart then
-                    -- Pada MM2 asli, parameter arah peluru diletakkan pada args[2] berbentuk koordinat Vector3
                     args[2] = targetPart.Position
                     return OldInvokeServer(self, unpack(args))
                 end
@@ -601,49 +650,25 @@ pcall(function()
     end)
 end)
 
-local function TriggerSilentAimShot()
-    local target = GetTargetByRole("Murderer") or SelectedPlayer
-    if not target then
-        Library:Notify("Silent Aim", "No target found (Murderer or Selected Player).", 2)
-        return
-    end
-    
-    local char = LocalPlayer.Character
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    local gun = char:FindFirstChild("Gun") or (backpack and backpack:FindFirstChild("Gun"))
-    
-    if not gun then
-        Library:Notify("Silent Aim", "Gun not found in your inventory.", 2)
-        return
-    end
-    
-    -- Temporarily force Silent Aim on
-    local oldSilentAimState = Settings.SilentAimEnabled
-    Settings.SilentAimEnabled = true
-    
-    -- Force equip weapon
-    if gun.Parent == backpack then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum:EquipTool(gun)
-        else
-            gun.Parent = char
+-- Loop Utama Tembak Otomatis (Auto Shoot Loop)
+task.spawn(function()
+    while true do
+        task.wait(0.05) -- Deteksi cepat setiap 0.05 detik
+        if Settings.SilentAimEnabled and Settings.AutoShootEnabled then
+            local char = LocalPlayer.Character
+            -- Pistol harus sedang dipegang oleh karakter agar skrip menembak otomatis
+            local gun = char and char:FindFirstChild("Gun")
+            if gun then
+                local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
+                local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if targetPart then
+                    FireGunAtTarget()
+                    task.wait(0.3) -- Cooldown aman antar tembakan otomatis
+                end
+            end
         end
     end
-    
-    task.wait(0.1) -- wait for weapon equip
-    
-    if gun.Parent == char then
-        gun:Activate()
-        Library:Notify("Silent Aim Shot", "Fired bullet towards " .. target.Name, 2)
-    end
-    
-    -- Cleanly transition state
-    task.spawn(function()
-        task.wait(0.5)
-        Settings.SilentAimEnabled = oldSilentAimState
-    end)
-end
+end)
 
 -- ========================================================
 -- [[ FEATURE 2 LOGIC: DOUBLE JUMP & INFINITE JUMP ]]
@@ -1209,7 +1234,7 @@ local function ApplyCoinESP()
     
     DeepScanWorkspaceCoins()
 
-    for _, coinPart in ipairs(ScannedCoins) do
+    for _, coinPart in ipanned ScannedCoins do
         if coinPart and coinPart.Parent and not coinPart:FindFirstChild("LouisCoinESP") then
             local box = Instance.new("BoxHandleAdornment")
             box.Name = "LouisCoinESP"
@@ -1387,7 +1412,7 @@ local function SafeFlingSheriffAndGrab()
 end
 
 -- ========================================================================
--- [[ MOBILITY PHYSICS ENGINE (FLY, NOCLIP, SPIN, FLING, SPEED, JUMP) ]]
+-- [[ MOBILITY PHYSICS ENGINE (FLY, NOCLIP, SPEED, JUMP) ]]
 -- ========================================================================
 local SpinVelocity
 local FlingVelocity
@@ -2136,7 +2161,7 @@ RegisterExternalButton(ExtJumpBoostBtn)
 
 -- Sheriff Silent Aim Shooting Trigger Button
 local ExtSilentAimBtn = Library:CreateExternalButton("SilentAim", ExtButtonTexts.SilentAim, UDim2.new(0, 170, 0.5, 80), function()
-    TriggerSilentAimShot()
+    FireGunAtTarget()
 end)
 RegisterExternalButton(ExtSilentAimBtn)
 
@@ -2232,13 +2257,17 @@ TabCombat:CreateToggle("Enable Gun Silent Aim Hook", false, function(state)
     Settings.SilentAimEnabled = state
 end)
 
+TabCombat:CreateToggle("Auto Shoot (Otomatis Tembak)", false, function(state)
+    Settings.AutoShootEnabled = state
+end)
+
 TabCombat:CreateToggle("Show Silent Aim Shooting Button [SA]", false, function(state)
     Settings.SilentAimExtEnabled = state
     ExtSilentAimBtn:SetVisible(state)
 end)
 
 TabCombat:CreateButton("Auto-Equip, Aim, & Fire Shot Now", function()
-    TriggerSilentAimShot()
+    FireGunAtTarget()
 end)
 
 TabCombat:CreateParagraph("Aimbot & Prediction", "Aimbot locks to murderer or targets based on role.")
