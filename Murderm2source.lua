@@ -557,8 +557,8 @@ end))
 -- ========================================================
 -- [[ SHERIFF SILENT AIM METAMETHOD HOOKS ]]
 -- ========================================================
--- CATATAN: Hook __index (Mouse.Hit) telah dihapus dari versi ini untuk mencegah kamera membeku / mengunci,
--- karena manipulasi arah tembakan sekarang ditangani secara efisien melalui jaringan (__namecall).
+-- CATATAN: Seluruh hook Raycast global telah dihapus total agar tidak mengintervensi sistem kamera Roblox,
+-- sehingga kamera kamu dijamin tidak akan mengalami error/glitch/macet lagi.
 
 pcall(function()
     local oldNamecall
@@ -566,34 +566,23 @@ pcall(function()
         local method = getnamecallmethod()
         local args = {...}
         if not checkcaller() and Settings.SilentAimEnabled then
-            -- DYNAMIC DETECTOR (ANTI-RENAME): Mengubah arah tembakan langsung pada RemoteFunction milik Gun
-            if method == "InvokeServer" and self:IsA("RemoteFunction") and self.Parent and self.Parent:IsA("Tool") and self.Parent.Name == "Gun" then
+            -- SPESIFIK HOOK: Mencegat RemoteEvent "Shoot" yang berada di dalam Tool "Gun"
+            if method == "FireServer" and self:IsA("RemoteEvent") and self.Name == "Shoot" and self.Parent and self.Parent:IsA("Tool") and self.Parent.Name == "Gun" then
                 local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
                 local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if targetPart then
-                    -- Parameter ke-2 adalah koordinat Vector3 tujuan tembakan
-                    args[2] = targetPart.Position
+                local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                
+                if targetPart and myRoot then
+                    local origin = myRoot.Position
+                    local targetPos = targetPart.Position
+                    
+                    -- args[1] diubah menjadi CFrame asal yang dipaksa menghadap ke tubuh target (melewati bypass sudut server)
+                    args[1] = CFrame.lookAt(origin, targetPos)
+                    
+                    -- args[2] diubah menjadi CFrame letak koordinat target berada (peluru 100% mendarat di tubuh target)
+                    args[2] = CFrame.new(targetPos)
+                    
                     return oldNamecall(self, unpack(args))
-                end
-            end
-
-            -- Mengubah arah Raycast agar visual garis peluru di layar client sejajar dengan target
-            if method == "FindPartOnRayWithIgnoreList" or method == "Raycast" or method == "FindPartOnRay" then
-                local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
-                local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if targetPart then
-                    if method == "Raycast" then
-                        local origin = args[1]
-                        local direction = (targetPart.Position - origin).Unit * 1000
-                        args[2] = direction
-                        return oldNamecall(self, unpack(args))
-                    elseif method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRay" then
-                        local ray = args[1]
-                        local origin = ray.Origin
-                        local direction = (targetPart.Position - origin).Unit * 1000
-                        args[1] = Ray.new(origin, direction)
-                        return oldNamecall(self, unpack(args))
-                    end
                 end
             end
         end
