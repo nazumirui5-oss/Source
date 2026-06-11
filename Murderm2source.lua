@@ -555,32 +555,49 @@ SafeConnect(RunService.RenderStepped, LPH_NO_VIRTUALIZE(function()
 end))
 
 -- ========================================================
--- [[ SHERIFF SILENT AIM METAMETHOD HOOKS ]]
+-- [[ SHERIFF SILENT AIM REMOTEFUNCTION HOOKS ]]
 -- ========================================================
--- CATATAN: Seluruh hook Raycast global telah dihapus total agar tidak mengintervensi sistem kamera Roblox,
--- sehingga kamera kamu dijamin tidak akan mengalami error/glitch/macet lagi.
+-- Menggunakan hook langsung pada level fungsi RemoteEvent & RemoteFunction bawaan Roblox (hookfunction).
+-- Ini jauh lebih cepat, dijamin tidak merusak skrip kamera bawaan, dan bebas dari error macet tembak (silent drops).
 
+-- 1. Hook untuk MM2 Modded / Sandbox (RemoteEvent "Shoot")
 pcall(function()
-    local oldNamecall
-    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        local method = getnamecallmethod()
+    local OldFireServer
+    OldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
         local args = {...}
         if not checkcaller() and Settings.SilentAimEnabled then
-            -- SPESIFIK HOOK: Mencegat RemoteEvent "Shoot"
-            if method == "FireServer" and tostring(self) == "Shoot" then
+            if tostring(self) == "Shoot" then
                 local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
                 local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-                
                 if targetPart then
-                    -- args[1] (Origin CFrame) dibiarkan ASLI agar lolos verifikasi jarak oleh server-side anti-cheat.
-                    -- Kita hanya membelokkan args[2] (Destination CFrame) menuju target.
+                    -- Mengubah target koordinat (args[2]) secara sah ke posisi target.
+                    -- args[1] (asal/origin) dibiarkan murni bawaan pistol agar lolos anti-cheat jarak.
                     args[2] = CFrame.new(targetPart.Position)
-                    
-                    return oldNamecall(self, unpack(args))
+                    return OldFireServer(self, unpack(args))
                 end
             end
         end
-        return oldNamecall(self, ...)
+        return OldFireServer(self, ...)
+    end)
+end)
+
+-- 2. Hook untuk MM2 Original (RemoteFunction "ShootGun")
+pcall(function()
+    local OldInvokeServer
+    OldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+        local args = {...}
+        if not checkcaller() and Settings.SilentAimEnabled then
+            if tostring(self) == "ShootGun" then
+                local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
+                local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if targetPart then
+                    -- Pada MM2 asli, parameter arah peluru diletakkan pada args[2] berbentuk koordinat Vector3
+                    args[2] = targetPart.Position
+                    return OldInvokeServer(self, unpack(args))
+                end
+            end
+        end
+        return OldInvokeServer(self, ...)
     end)
 end)
 
