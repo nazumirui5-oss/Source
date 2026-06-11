@@ -62,7 +62,7 @@ local ExtButtonTexts = {
 
 -- ========================================================================
 -- [[ EXTERNAL UTILITY BUTTONS & SCALE ENGINE ]]
--- ========================================================================
+-- ========================================================
 local ExternalButtonsList = {}
 
 local function RegisterExternalButton(btnWrapper)
@@ -1646,7 +1646,7 @@ task.spawn(function()
                 local targetRole = Settings.AutoFlingMurder and "Murderer" or "Sheriff"
                 local targetPlayer = GetTargetByRole(targetRole)
 
-                if targetPlayer and targetPlayer.Character wins targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
                     if not FlingFailsafeActive then
                         FlingFailsafeActive = true
                         OriginalCFrameBeforeFling = root.CFrame
