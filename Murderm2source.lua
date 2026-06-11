@@ -1013,9 +1013,9 @@ local function CollectCoin(coinPart)
     task.wait(0.05)
 end
 
--- ========================================================================
+-- ========================================================
 -- [[ COIN FARM DETECTOR BACK-THREAD TIMER SYSTEM ]]
--- ========================================================================
+-- ========================================================
 task.spawn(function()
     while true do
         task.wait(1)
@@ -1234,7 +1234,7 @@ local function ApplyCoinESP()
     
     DeepScanWorkspaceCoins()
 
-    for _, coinPart in ipanned ScannedCoins do
+    for _, coinPart in ipairs(ScannedCoins) do
         if coinPart and coinPart.Parent and not coinPart:FindFirstChild("LouisCoinESP") then
             local box = Instance.new("BoxHandleAdornment")
             box.Name = "LouisCoinESP"
