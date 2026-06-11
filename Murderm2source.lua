@@ -581,6 +581,18 @@ pcall(function()
         local method = getnamecallmethod()
         local args = {...}
         if not checkcaller() and Settings.SilentAimEnabled then
+            -- DYNAMIC DETECTOR: Intercept any RemoteFunction child of the Tool named "Gun"
+            if method == "InvokeServer" and self:IsA("RemoteFunction") and self.Parent and self.Parent:IsA("Tool") and self.Parent.Name == "Gun" then
+                local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
+                local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if targetPart then
+                    -- Parameter 2 is typically the Target Position Vector3
+                    args[2] = targetPart.Position
+                    return oldNamecall(self, unpack(args))
+                end
+            end
+
+            -- Fallback Raycast Redirection to align bullet tracers beautifully
             if method == "FindPartOnRayWithIgnoreList" or method == "Raycast" or method == "FindPartOnRay" then
                 local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
                 local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -1120,18 +1132,15 @@ end))
 -- ========================================================
 task.spawn(function()
     while true do
-        task.wait(0.1)
-        local char = LocalPlayer.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        
-        if Settings.KillAuraEnabled and char and root then
-            local knife = char:FindFirstChild("Knife")
+        local character = LocalPlayer.Character
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+        if Settings.KillAuraEnabled and character and root then
+            local knife = character:FindFirstChild("Knife")
             if knife and GetMM2Role(LocalPlayer) == "Murderer" then
                 for _, p in ipairs(Players:GetPlayers()) do
                     if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
                         local tRoot = p.Character.HumanoidRootPart
                         local tHum = p.Character:FindFirstChildOfClass("Humanoid")
-                        
                         if tHum and tHum.Health > 0 then
                             local distance = (root.Position - tRoot.Position).Magnitude
                             if distance <= Settings.KillAuraRadius then
@@ -1146,6 +1155,7 @@ task.spawn(function()
                 end
             end
         end
+        task.wait(0.1)
     end
 end)
 
@@ -1733,7 +1743,7 @@ local function ApplyNameESP(player)
     
     local role = GetMM2Role(player)
     local targetColor = Color3.fromRGB(0, 225, 0)
-    if role == "Murderer" then targetColor = Color3.fromRGB(255, 0, 0)
+    if role == "Murderer" then targetColor = Color3.fromRGB(255, 0,  red)
     elseif role == "Sheriff" then targetColor = Color3.fromRGB(0, 0, 225) end
     
     local label = billboard:FindFirstChildOfClass("TextLabel")
