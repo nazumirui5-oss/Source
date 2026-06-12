@@ -29,6 +29,7 @@ local originalRotVelocity = Vector3.new(0, 0, 0)
 local FlingFailsafeActive = false
 local OriginalCFrameBeforeFling = nil
 local SafePlatform = nil
+local AntiFlingConnection = nil
 
 -- Additional State For Coin Farm Underground Idle & Timer
 local WasUnderground = false
@@ -38,6 +39,7 @@ local CoinFarmTimeLeft = 60
 local IsFlingingFromFarm = false
 local FlingDurationLeft = 12
 local lastShotTime = 0
+local lastTouchFlingState = false
 
 -- ========================================================================
 -- [[ EXTERNAL BUTTON TEXT CUSTOMIZATION ]]
@@ -61,7 +63,7 @@ local ExtButtonTexts = {
     SilentAim = "S_AIM"
 }
 
--- ========================================================
+-- ========================================================================
 -- [[ EXTERNAL UTILITY BUTTONS & SCALE ENGINE ]]
 -- ========================================================
 local ExternalButtonsList = {}
@@ -168,12 +170,15 @@ local Settings = {
     AutoBhopEnabled = false,
     EarlyRoleDetect = true,
 
-    -- Custom Jump Boost & Silent Aim Configuration
+    -- Custom Configuration Modifiers
     JumpBoostEnabled = false,
     JumpBoostValue = 35,
     SilentAimEnabled = false,
     SilentAimExtEnabled = false,
-    AutoShootEnabled = false -- Auto Shoot Feature Toggle
+    AutoShootEnabled = false,
+    SilentAimType = "Normal", -- "Normal" or "Instant"
+    AimbotType = "Instant", -- "Instant" or "Normal"
+    AimbotSmoothingValue = 0.15
 }
 
 local OriginalFOV = Camera.FieldOfView
@@ -557,7 +562,12 @@ SafeConnect(RunService.RenderStepped, LPH_NO_VIRTUALIZE(function()
             if TargetPart then
                 local PredictedPos = GetPredictedPosition(TargetPart)
                 if PredictedPos then
-                    Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, PredictedPos)
+                    local targetCFrame = CFrame.lookAt(Camera.CFrame.Position, PredictedPos)
+                    if Settings.AimbotType == "Instant" then
+                        Camera.CFrame = targetCFrame
+                    else
+                        Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, Settings.AimbotSmoothingValue)
+                    end
                 end
             end
         end
@@ -606,11 +616,20 @@ local function FireGunAtTarget()
     local shootRemote = gun:FindFirstChild("Shoot") -- Custom / Sandbox MM2 (RemoteEvent)
     local shootGunRemote = gun:FindFirstChild("ShootGun") -- Original MM2 (RemoteFunction)
     
+    local targetPos = targetPart.Position
+    if Settings.SilentAimType == "Instant" then
+        local ping = 0.05
+        pcall(function() ping = LocalPlayer:GetNetworkPing() end)
+        local distance = (myRoot.Position - targetPart.Position).Magnitude
+        local travelTime = distance / 230
+        targetPos = targetPart.Position + (targetPart.AssemblyLinearVelocity * (travelTime + ping))
+    end
+    
     if shootRemote and shootRemote:IsA("RemoteEvent") then
-        shootRemote:FireServer(myRoot.CFrame, CFrame.new(targetPart.Position))
+        shootRemote:FireServer(myRoot.CFrame, CFrame.new(targetPos))
         Library:Notify("Silent Aim", "Shooting (Sandbox) -> " .. targetPlayer.DisplayName, 1.5)
     elseif shootGunRemote and shootGunRemote:IsA("RemoteFunction") then
-        shootGunRemote:InvokeServer(1, targetPart.Position, "AH2")
+        shootGunRemote:InvokeServer(1, targetPos, "AH2")
         Library:Notify("Silent Aim", "Shooting (Original) -> " .. targetPlayer.DisplayName, 1.5)
     else
         Library:Notify("Silent Aim", "Shooting Remote not detected in Gun.", 2)
@@ -620,8 +639,7 @@ end
 -- ========================================================
 -- [[ PASIVE SILENT AIM METAMETHOD NAMECALL HOOKS ]]
 -- ========================================================
--- This highly accurate Hook intercepts fast-path Luau NAMECALL instructions to ensure
--- all shoots redirect perfectly to target at C-Level without network desync.
+-- Intercepts fast-path Luau NAMECALL instructions to ensure shooting redirects perfectly.
 pcall(function()
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
@@ -632,9 +650,17 @@ pcall(function()
             if method == "FireServer" and tostring(self) == "Shoot" then
                 local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
                 local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if targetPart then
-                    -- Preserve original origin CFrame to bypass server-side distance anti-cheat checks.
-                    args[2] = CFrame.new(targetPart.Position)
+                local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if targetPart and myRoot then
+                    local targetPos = targetPart.Position
+                    if Settings.SilentAimType == "Instant" then
+                        local ping = 0.05
+                        pcall(function() ping = LocalPlayer:GetNetworkPing() end)
+                        local distance = (myRoot.Position - targetPart.Position).Magnitude
+                        local travelTime = distance / 230
+                        targetPos = targetPart.Position + (targetPart.AssemblyLinearVelocity * (travelTime + ping))
+                    end
+                    args[2] = CFrame.new(targetPos)
                     return oldNamecall(self, unpack(args))
                 end
             end
@@ -643,8 +669,17 @@ pcall(function()
             if method == "InvokeServer" and tostring(self) == "ShootGun" then
                 local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
                 local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if targetPart then
-                    args[2] = targetPart.Position
+                local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if targetPart and myRoot then
+                    local targetPos = targetPart.Position
+                    if Settings.SilentAimType == "Instant" then
+                        local ping = 0.05
+                        pcall(function() ping = LocalPlayer:GetNetworkPing() end)
+                        local distance = (myRoot.Position - targetPart.Position).Magnitude
+                        local travelTime = distance / 230
+                        targetPos = targetPart.Position + (targetPart.AssemblyLinearVelocity * (travelTime + ping))
+                    end
+                    args[2] = targetPos
                     return oldNamecall(self, unpack(args))
                 end
             end
@@ -1304,11 +1339,17 @@ local function FlingPlayer(targetPlayer)
         Settings.TouchFling = true
         
         task.spawn(function()
+            local orbitAngle = 0
             for i = 1, 150 do
                 if not targetRoot or not targetHum or targetHum.Health <= 0 or not root or not char:FindFirstChild("HumanoidRootPart") then
                     break
                 end
-                root.CFrame = targetRoot.CFrame * CFrame.new(math.random(-1, 1) * 0.1, 0, math.random(-1, 1) * 0.1)
+                
+                -- Dynamic high-speed orbit math positioning to bypass knives or shots
+                orbitAngle = (orbitAngle + 0.8) % (math.pi * 2)
+                local offset = Vector3.new(math.cos(orbitAngle) * 3.5, 0, math.sin(orbitAngle) * 3.5)
+                root.CFrame = CFrame.new(targetRoot.Position + offset)
+                
                 task.wait(0.02)
             end
             Settings.TouchFling = originalFlingState
@@ -1327,13 +1368,13 @@ local function SafeFlingSheriffAndGrab()
     local root = char and char:FindFirstChild("HumanoidRootPart")
     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
     if not root or not humanoid or humanoid.Health <= 0 then 
-        Library:Notify("Fling + Grab", "Karakter tidak siap atau mati.", 2)
+        Library:Notify("Fling + Grab", "Character not ready or is dead.", 2)
         return 
     end
     
     local target = GetTargetByRole("Sheriff")
     if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then
-        Library:Notify("Fling + Grab", "Sheriff tidak ditemukan atau sudah mati.", 2.5)
+        Library:Notify("Fling + Grab", "Sheriff not found or already eliminated.", 2.5)
         return
     end
     
@@ -1342,7 +1383,7 @@ local function SafeFlingSheriffAndGrab()
     local originalPos = root.CFrame
     local originalFlingState = Settings.TouchFling
     
-    Library:Notify("Fling + Grab", "Memulai Fling Sheriff...", 1.5)
+    Library:Notify("Fling + Grab", "Starting Fling Sheriff... Max 5 seconds.", 2)
     
     -- Save our safety position in case we fall
     SavePosition()
@@ -1363,6 +1404,7 @@ local function SafeFlingSheriffAndGrab()
         end
     end)
     
+    local orbitAngle = 0
     while os.clock() - flingStartTime < 5.0 do
         if not targetRoot or not targetHum or targetHum.Health <= 0 or humanoid.Health <= 0 then
             break
@@ -1381,7 +1423,11 @@ local function SafeFlingSheriffAndGrab()
             task.wait(0.1)
         end
         
-        root.CFrame = targetRoot.CFrame * CFrame.new(math.random(-1, 1) * 0.15, 0, math.random(-1, 1) * 0.15)
+        -- High-speed orbit rotation around the Sheriff so they can't shoot us
+        orbitAngle = (orbitAngle + 0.8) % (math.pi * 2)
+        local offset = Vector3.new(math.cos(orbitAngle) * 3.5, 0, math.sin(orbitAngle) * 3.5)
+        root.CFrame = CFrame.new(targetRoot.Position + offset)
+        
         task.wait(0.02)
     end
     
@@ -1441,12 +1487,26 @@ end
 -- ========================================================================
 -- [[ MOBILITY PHYSICS ENGINE (FLY, NOCLIP, SPEED, JUMP) ]]
 -- ========================================================================
-local function ToggleNoclip(state)
-    Settings.NoclipEnabled = state
-    if not state and LocalPlayer.Character and not Settings.CoinFarmEnabled then
-        for _, child in ipairs(LocalPlayer.Character:GetDescendants()) do
-            if child:IsA("BasePart") then child.CanCollide = true end
-        end
+-- Anti-Fling Module derived from Infinite Yield Universal script
+local function ToggleAntiFling(state)
+    Settings.AntiFling = state
+    if AntiFlingConnection then
+        AntiFlingConnection:Disconnect()
+        AntiFlingConnection = nil
+    end
+    
+    if state then
+        AntiFlingConnection = RunService.Stepped:Connect(function()
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character then
+                    for _, part in ipairs(player.Character:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+                end
+            end
+        end)
     end
 end
 
@@ -1505,19 +1565,19 @@ SafeConnect(RunService.Heartbeat, LPH_NO_VIRTUALIZE(function()
         end
 
         if Settings.TouchFling then
+            lastTouchFlingState = true
             local multiplier = Settings.FlingPower * 1000
             originalVelocity = root.AssemblyLinearVelocity
             originalRotVelocity = root.AssemblyAngularVelocity
             
             root.AssemblyLinearVelocity = Vector3.new(multiplier, multiplier, multiplier)
             root.AssemblyAngularVelocity = Vector3.new(0, multiplier, 0)
-        end
-
-        -- Optimized Anti-Fling Logic
-        if Settings.AntiFling and not Settings.TouchFling then
-            root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-            if root.AssemblyLinearVelocity.Magnitude > 75 then
+        else
+            -- Fix Touch Fling Self-Fling Glitch: Zeroes velocity when disabled to stabilize player physics
+            if lastTouchFlingState then
+                lastTouchFlingState = false
                 root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
             end
         end
     end
@@ -1552,25 +1612,6 @@ task.spawn(function()
             end
         end
         task.wait(0.5)
-    end
-end)
-
-task.spawn(function()
-    while true do
-        if Settings.AntiFling then
-            pcall(function()
-                for _, player in ipairs(Players:GetPlayers()) do
-                    if player ~= LocalPlayer and player.Character then
-                        for _, part in ipairs(player.Character:GetDescendants()) do
-                            if part:IsA("BasePart") and part.CanCollide then
-                                part.CanCollide = false
-                            end
-                        end
-                    end
-                end
-            end)
-        end
-        task.wait(0.3)
     end
 end)
 
@@ -1710,9 +1751,18 @@ task.spawn(function()
                     end
 
                     local tRoot = targetPlayer.Character.HumanoidRootPart
-                    root.CFrame = tRoot.CFrame * CFrame.new(math.random(-1,1) * 0.1, 0, math.random(-1,1) * 0.1)
-                    root.AssemblyLinearVelocity = Vector3.new(99999, 99999, 99999)
-                    root.AssemblyAngularVelocity = Vector3.new(0, 99999, 0)
+                    local orbitAngle = 0
+                    
+                    -- Actively Orbit target at high speed to bypass potential shots or knives
+                    while targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") and (Settings.AutoFlingMurder or Settings.AutoFlingSheriff) do
+                        if humanoid.Health <= 0 then break end
+                        orbitAngle = (orbitAngle + 0.8) % (math.pi * 2)
+                        local offset = Vector3.new(math.cos(orbitAngle) * 3.5, 0, math.sin(orbitAngle) * 3.5)
+                        root.CFrame = CFrame.new(tRoot.Position + offset)
+                        root.AssemblyLinearVelocity = Vector3.new(99999, 99999, 99999)
+                        root.AssemblyAngularVelocity = Vector3.new(0, 99999, 0)
+                        task.wait(0.02)
+                    end
                 else
                     if FlingFailsafeActive then
                         Settings.AutoFlingMurder = false
@@ -1793,7 +1843,7 @@ local ActiveTracers = {}
 local function ClearAllTracers()
     for _, tracer in pairs(ActiveTracers) do
         tracer.Visible = false
-        tracer:Remove()
+        pcall(function() tracer:Remove() end)
     end
     table.clear(ActiveTracers)
 end
@@ -2258,13 +2308,17 @@ TabCombat:CreateSlider("Fling Velocity Power multiplier", 1, 200, Settings.Fling
     Settings.FlingPower = val
 end)
 
-TabCombat:CreateToggle("Anti Fling (Collision Resistance)", false, function(state)
-    Settings.AntiFling = state
+TabCombat:CreateToggle("Infinite Yield Anti Fling", false, function(state)
+    ToggleAntiFling(state)
 end)
 
 TabCombat:CreateParagraph("Sheriff Silent Aim & Shoot", "Inject metamethod redirection to lock bullets on the Murderer.")
 TabCombat:CreateToggle("Enable Gun Silent Aim Hook", false, function(state)
     Settings.SilentAimEnabled = state
+end)
+
+TabCombat:CreateDropdown("Silent Aim Accuracy Mode", {"Normal", "Instant"}, "Normal", function(selected)
+    Settings.SilentAimType = selected
 end)
 
 TabCombat:CreateToggle("Auto Shoot (Otomatis Tembak)", false, function(state)
@@ -2283,6 +2337,14 @@ end)
 TabCombat:CreateParagraph("Aimbot & Prediction", "Aimbot locks to murderer or targets based on role.")
 local AimbotToggle = TabCombat:CreateToggle("Aim Assist Lock (Holding Gun/Knife)", false, function(state)
     Settings.CameraAimbot = state
+end)
+
+TabCombat:CreateDropdown("Aimbot Targeting Mode", {"Normal", "Instant"}, "Instant", function(selected)
+    Settings.AimbotType = selected
+end)
+
+TabCombat:CreateSlider("Aimbot Smoothing speed %", 1, 100, 15, function(val)
+    Settings.AimbotSmoothingValue = val / 100
 end)
 
 TabCombat:CreateToggle("Show Master Aimbot Button [A]", false, function(state)
