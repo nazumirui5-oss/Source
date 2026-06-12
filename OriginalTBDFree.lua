@@ -81,8 +81,6 @@ _G.PassExternalVisible = false -- Visibility eksternal tombol oper bom
 _G.RangeChaseEnabled = false
 _G.RangeChaseValue = 30
 _G.TripEnabled = false
-_G.WallAvoidEnabled = false
-_G.WallAvoidMethod = "Jump" -- "Jump" atau "Avoid"
 
 local isHeadlessActive = false
 local isKorbloxActive = false
@@ -492,56 +490,6 @@ local function ApplyRandomAvatar()
 end
 
 -- ========================================================
--- [[ DETEKSI DINDING & JALUR KOSONG (OPTIMIZED 1.5 STUD) ]]
--- ========================================================
-local function CheckWallInFront(moveDirection, customDistance)
-    local char = LocalPlayer.Character
-    if not char then return false, nil end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false, nil end
-    
-    local dir = (moveDirection or hrp.CFrame.LookVector).Unit
-    local params = RaycastParams.new()
-    params.FilterDescendantsInstances = {char, Camera}
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    
-    local origin = hrp.Position + Vector3.new(0, -0.5, 0)
-    local checkDist = customDistance or 1.5
-    local result = workspace:Raycast(origin, dir * checkDist, params)
-    
-    if result and result.Instance and result.Instance.CanCollide then
-        return true, result
-    end
-    return false, nil
-end
-
--- Memindai sudut alternatif terdekat untuk menghindari dinding (Avoid Mode)
-local function FindOpenPath(moveDirection)
-    local char = LocalPlayer.Character
-    if not char then return moveDirection end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return moveDirection end
-    
-    local baseDir = moveDirection.Unit
-    local params = RaycastParams.new()
-    params.FilterDescendantsInstances = {char, Camera}
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    local origin = hrp.Position + Vector3.new(0, -0.5, 0)
-    
-    -- Mencoba menyimpang ke kiri/kanan dari sudut kecil ke besar
-    local checkAngles = {30, -30, 45, -45, 60, -60, 90, -90, 120, -120}
-    for _, angle in ipairs(checkAngles) do
-        local rotatedDir = (CFrame.Angles(0, math.rad(angle), 0) * Vector3.new(baseDir.X, 0, baseDir.Z)).Unit
-        -- Periksa jalur sejauh 3.5 stud untuk memastikan rute alternatif aman dan luas
-        local res = workspace:Raycast(origin, rotatedDir * 3.5, params)
-        if not res or not res.Instance or not res.Instance.CanCollide then
-            return rotatedDir
-        end
-    end
-    return -baseDir -- Kembali ke belakang jika semua sudut terhalang
-end
-
--- ========================================================
 -- [[ FPS & PING HUD POJOK KANAN TENGAH (BOTTOM LAYER) ]]
 -- ========================================================
 local HudGui = Instance.new("ScreenGui")
@@ -557,7 +505,7 @@ HudFrame.Position = UDim2.new(1, -110, 0.5, -22) -- Pojok kanan tengah layar
 HudFrame.BackgroundTransparency = 0.5
 HudFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 HudFrame.BorderSizePixel = 0
-HudFrame.Parent = HudGui
+HudFrame.Parent = HudFrame.Parent and HudFrame.Parent:FindFirstChild("LouisHub_FPS_Ping_HUD") and HudGui or HudGui
 
 local HudCorner = Instance.new("UICorner")
 HudCorner.CornerRadius = UDim.new(0, 6)
@@ -601,10 +549,40 @@ SafeConnect(RunService.RenderStepped, function()
     end
 end)
 
+-- Robust Ping Retrieval Engine
+local function GetActualPing()
+    local ping = 0
+    local success = pcall(function()
+        local serverStats = game:GetService("Stats"):FindFirstChild("Network")
+        if serverStats then
+            local dataPing = serverStats:FindFirstChild("ServerStatsItem") and serverStats.ServerStatsItem:FindFirstChild("Data Ping")
+            if dataPing then
+                ping = dataPing:GetValue()
+            end
+        end
+    end)
+    if not success or ping == 0 then
+        pcall(function()
+            ping = game:GetService("Stats").PerformanceStats.Ping:GetValue()
+        end)
+    end
+    if ping == 0 then
+        pcall(function()
+            ping = LocalPlayer:GetNetworkPing() * 1000
+        end)
+    end
+    if ping == 0 then
+        pcall(function()
+            ping = game:GetService("Stats").Network.ServerToClientPing:GetValue() * 1000
+        end)
+    end
+    return math.round(ping)
+end
+
 task.spawn(function()
     while true do
         pcall(function()
-            local pingVal = math.round(Stats.Network.ServerToClientPing:GetValue() * 1000)
+            local pingVal = GetActualPing()
             PingLabel.Text = "PING: " .. tostring(pingVal) .. " ms"
         end)
         task.wait(1)
@@ -1213,28 +1191,11 @@ SafeConnect(RunService.Heartbeat, LPH_NO_VIRTUALIZE(function(dt)
         end
     end
 
-    -- WALK & CHASE AUTOMATIONS (INTEGRATED WALL AVOIDANCE & RANGE CHASE FIX)
+    -- WALK & CHASE AUTOMATIONS
     if _G.RangeChaseEnabled then
         if lockedTarget and isAlive(lockedTarget) then
             local tRoot = lockedTarget.Character.HumanoidRootPart
             local targetPos = tRoot.Position
-            local moveDirection = (targetPos - root.Position).Unit
-            
-            -- Integrasi Wall Avoidance System pada pergerakan Range Chase (1.5 Stud)
-            if _G.WallAvoidEnabled then
-                local hasObstacle, hitInfo = CheckWallInFront(moveDirection, 1.5)
-                if hasObstacle then
-                    if _G.WallAvoidMethod == "Jump" then
-                        if hum.FloorMaterial ~= Enum.Material.Air then
-                            hum.Jump = true
-                        end
-                    elseif _G.WallAvoidMethod == "Avoid" then
-                        moveDirection = FindOpenPath(moveDirection)
-                        targetPos = root.Position + moveDirection * 5
-                    end
-                end
-            end
-            
             hum:MoveTo(targetPos)
         end
     elseif _G.AutoWalkActive then
@@ -1261,20 +1222,6 @@ SafeConnect(RunService.Heartbeat, LPH_NO_VIRTUALIZE(function(dt)
                         if not altRay or not altRay.Instance.CanCollide then
                             moveDir = worldAltDir
                             break
-                        end
-                    end
-                end
-                
-                -- Integrasi Wall Avoidance pada AutoWalk Active mengejar target (1.5 Stud)
-                if _G.WallAvoidEnabled then
-                    local hasObstacle, hitInfo = CheckWallInFront(moveDir, 1.5)
-                    if hasObstacle then
-                        if _G.WallAvoidMethod == "Jump" then
-                            if hum.FloorMaterial ~= Enum.Material.Air then
-                                hum.Jump = true
-                            end
-                        elseif _G.WallAvoidMethod == "Avoid" then
-                            moveDir = FindOpenPath(moveDir)
                         end
                     end
                 end
@@ -1324,20 +1271,6 @@ SafeConnect(RunService.Heartbeat, LPH_NO_VIRTUALIZE(function(dt)
                     end
                 end
                 
-                -- Integrasi Wall Avoidance pada AutoWalk Active mundur menjauh (1.5 Stud)
-                if _G.WallAvoidEnabled then
-                    local hasObstacle, hitInfo = CheckWallInFront(moveDir, 1.5)
-                    if hasObstacle then
-                        if _G.WallAvoidMethod == "Jump" then
-                            if hum.FloorMaterial ~= Enum.Material.Air then
-                                hum.Jump = true
-                            end
-                        elseif _G.WallAvoidMethod == "Avoid" then
-                            moveDir = FindOpenPath(moveDir)
-                        end
-                    end
-                end
-                
                 local nextPos = root.Position + (moveDir * speed * dt)
                 local targetY = root.Position.Y
                 
@@ -1368,21 +1301,6 @@ SafeConnect(RunService.Heartbeat, LPH_NO_VIRTUALIZE(function(dt)
             local shouldFollow = _G.FollowEnabled or _G.AutoHoldActive
             local targetPos = _G.PredictEnabled and (tRoot.Position + (tRoot.Velocity * 0.13)) or tRoot.Position
             local moveDirection = (targetPos - root.Position).Unit
-            
-            -- Integrasi Wall Avoidance pada pergerakan Follow Biasa (1.5 Stud)
-            if _G.WallAvoidEnabled then
-                local hasObstacle, hitInfo = CheckWallInFront(moveDirection, 1.5)
-                if hasObstacle then
-                    if _G.WallAvoidMethod == "Jump" then
-                        if hum.FloorMaterial ~= Enum.Material.Air then
-                            hum.Jump = true
-                        end
-                    elseif _G.WallAvoidMethod == "Avoid" then
-                        moveDirection = FindOpenPath(moveDirection)
-                        targetPos = root.Position + moveDirection * 5
-                    end
-                end
-            end
             
             if shouldFollow and retreatTimer <= 0 then 
                 hum:MoveTo(targetPos) 
@@ -1642,30 +1560,16 @@ TabMovement:CreateToggle("Enable Trip Fall", false, "TripEnabled", function(stat
     end
 end)
 
--- DETEKSI DINDING (WALL AVOIDANCE) - OPTIMIZED 1.5 STUD
-TabMovement:CreateParagraph("Wall Detection System", "Deteksi dinding secara otomatis di depan arah gerak karakter Anda.")
-
-TabMovement:CreateToggle("Enable Wall Detection Avoidance", false, "WallAvoidEnabled", function(state)
-    _G.WallAvoidEnabled = state
-end)
-
-TabMovement:CreateDropdown("Wall Avoid Method", {"Jump", "Avoid"}, "Jump", "WallAvoidMethod", function(val)
-    _G.WallAvoidMethod = val
-end)
-
-TabMovement:CreateParagraph("Freeze Simulator", "Simulate network delay by anchoring parts in place.")
+TabMovement:CreateParagraph("Freeze System", "Freeze your character locally in place (anchors parts and platform stands) like Infinite Yield.")
 
 TabMovement:CreateToggle("[O] Enable Freeze System", false, "FreezeEnabled", function(state)
     _G.FreezeEnabled = state
     SafeSetVisible(_G.ExtFreezeBtn, state)
     if not state then
         pcall(function()
-            for _, part in ipairs(activeAnchoredParts or {}) do
-                part.Anchored = false
+            if isFreezing then
+                stopFreeze()
             end
-            table.clear(activeAnchoredParts or {})
-            SafeSetText(_G.ExtFreezeBtn, "FREEZE")
-            isFreezing = false
         end)
     end
 end)
@@ -1902,46 +1806,44 @@ _G.ExtFollowBtn = Library:CreateExternalButton("Follow", "AUTO FOLLOW", UDim2.ne
 end)
 RegisterExternalButton(_G.ExtFollowBtn)
 
--- TOMBOL FREEZE
+-- TOMBOL FREEZE (INFINITE YIELD METHOD)
 local isFreezing = false
-local activeAnchoredParts = {}
+
+local function applyFreeze(state)
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.Anchored = state
+        end
+    end
+    
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.PlatformStand = state
+    end
+end
 
 local function stopFreeze()
     if not isFreezing then return end
-    for _, part in ipairs(activeAnchoredParts) do
-        pcall(function() part.Anchored = false end)
-    end
-    table.clear(activeAnchoredParts)
-    SafeSetText(_G.ExtFreezeBtn, "FREEZE")
     isFreezing = false
+    applyFreeze(false)
+    SafeSetText(_G.ExtFreezeBtn, "FREEZE")
+end
+
+local function startFreeze()
+    if isFreezing then return end
+    isFreezing = true
+    applyFreeze(true)
+    SafeSetText(_G.ExtFreezeBtn, "FROZEN")
 end
 
 _G.ExtFreezeBtn = Library:CreateExternalButton("Freeze", "FREEZE", UDim2.new(0.5, -155, 0.8, 0), function()
     if isFreezing then
         stopFreeze()
     else
-        isFreezing = true
-        SafeSetText(_G.ExtFreezeBtn, "LAGGING")
-        
-        local char = LocalPlayer.Character
-        table.clear(activeAnchoredParts)
-        if char then
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") and not part.Anchored then
-                    part.Anchored = true
-                    table.insert(activeAnchoredParts, part)
-                end
-            end
-        end
-        
-        task.spawn(function()
-            local elapsed = 0
-            while elapsed < 3.5 and isFreezing do
-                task.wait(0.1)
-                elapsed = elapsed + 0.1
-            end
-            if isFreezing then stopFreeze() end
-        end)
+        startFreeze()
     end
 end)
 RegisterExternalButton(_G.ExtFreezeBtn)
@@ -1996,7 +1898,7 @@ _G.ExtRangeChaseBtn = Library:CreateExternalButton("RangeChase", "RANGE CHASE", 
 end)
 RegisterExternalButton(_G.ExtRangeChaseBtn)
 
--- TOMBOL TRIP FALL (MENGGANTIKAN RAGDOLL FALL)
+-- TOMBOL TRIP FALL
 _G.ExtTripBtn = Library:CreateExternalButton("TripFall", "TRIP FALL", UDim2.new(0.5, -155, 0.72, 0), function()
     _G.TripEnabled = not _G.TripEnabled
     ApplyTrip(_G.TripEnabled)
@@ -2086,29 +1988,8 @@ SafeConnect(UserInputService.InputBegan, function(input, gameProcessed)
                 stopFreeze()
                 Library:Notify("Freeze", "Freeze system deactivated", 1.5)
             else
-                isFreezing = true
-                SafeSetText(_G.ExtFreezeBtn, "LAGGING")
+                startFreeze()
                 Library:Notify("Freeze", "Freeze system activated", 1.5)
-                
-                local char = LocalPlayer.Character
-                table.clear(activeAnchoredParts)
-                if char then
-                    for _, part in ipairs(char:GetDescendants()) do
-                        if part:IsA("BasePart") and not part.Anchored then
-                            part.Anchored = true
-                            table.insert(activeAnchoredParts, part)
-                        end
-                    end
-                end
-                
-                task.spawn(function()
-                    local elapsed = 0
-                    while elapsed < 3.5 and isFreezing do
-                        task.wait(0.1)
-                        elapsed = elapsed + 0.1
-                    end
-                    if isFreezing then stopFreeze() end
-                end)
             end
         end
         
@@ -2149,4 +2030,4 @@ SafeConnect(UserInputService.InputBegan, function(input, gameProcessed)
         end
         Library:Notify("Custom Crosshair", "Custom Crosshair is now " .. (_G.CrosshairEnabled and "Enabled" or "Disabled"), 1.5)
     end
-end) 
+end)
