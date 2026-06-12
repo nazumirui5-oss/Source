@@ -149,7 +149,7 @@ local Settings = {
 
     -- Additional Integration Features
     InfiniteJump = false,
-    AntiVoid = false,
+    AntiVoid = true, -- Enabled by default to protect player
     AntiFling = false,
     TouchFling = false,
     FlingPower = 100,
@@ -173,7 +173,7 @@ local Settings = {
     JumpBoostValue = 35,
     SilentAimEnabled = false,
     SilentAimExtEnabled = false,
-    AutoShootEnabled = false -- Fitur Tembak Otomatis
+    AutoShootEnabled = false -- Auto Shoot Feature
 }
 
 local OriginalFOV = Camera.FieldOfView
@@ -498,7 +498,15 @@ local function TeleportToSafeInnocent()
     end
     
     if bestTarget then
-        root.CFrame = bestTarget.CFrame * CFrame.new(0, 0, 3)
+        -- Teleport 3.5 studs above the target to completely prevent clipping underground
+        root.CFrame = bestTarget.CFrame * CFrame.new(0, 3.5, 0)
+        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+        
+        -- Anchor briefly to let Roblox collision engine load correctly
+        root.Anchored = true
+        task.wait(0.15)
+        root.Anchored = false
     end
 end
 
@@ -559,13 +567,15 @@ end))
 -- ========================================================================
 -- [[ UNIVERSAL SHERIFF FIRE & SILENT AIM ENGINE ]]
 -- ========================================================================
+-- Universal firing handler. Employs direct network triggers (Remote Bypass)
+-- to shoot targets instantly on the server with perfect alignment.
 local function FireGunAtTarget()
     local char = LocalPlayer.Character
     local backpack = LocalPlayer:FindFirstChild("Backpack")
     local gun = char and char:FindFirstChild("Gun") or (backpack and backpack:FindFirstChild("Gun"))
     
     if not gun then
-        Library:Notify("Silent Aim", "Pistol tidak ditemukan di tas atau karakter.", 2)
+        Library:Notify("Silent Aim", "Gun not found in Backpack or Character.", 2)
         return
     end
     
@@ -574,20 +584,20 @@ local function FireGunAtTarget()
     local myRoot = char and char:FindFirstChild("HumanoidRootPart")
     
     if not targetPart or not myRoot then
-        Library:Notify("Silent Aim", "Target Murderer tidak ditemukan.", 2)
+        Library:Notify("Silent Aim", "Target Murderer not found.", 2)
         return
     end
     
-    -- Jeda Cooldown tembakan manual/otomatis agar tidak dianggap spam oleh server
+    -- Delay cooldown to prevent spam kicks/bans
     if os.clock() - lastShotTime < 0.35 then return end
     lastShotTime = os.clock()
     
-    -- Auto-Equip Pistol jika masih ada di Backpack
+    -- Auto-Equip if still in Backpack
     if gun.Parent == backpack then
         local hum = char:FindFirstChildOfClass("Humanoid")
         if hum then
             hum:EquipTool(gun)
-            task.wait(0.05) -- Beri jeda sangat singkat agar server meregistrasikan status equip
+            task.wait(0.05) -- Brief delay for server to register equip state
         else
             gun.Parent = char
             task.wait(0.05)
@@ -599,19 +609,19 @@ local function FireGunAtTarget()
     
     if shootRemote and shootRemote:IsA("RemoteEvent") then
         shootRemote:FireServer(myRoot.CFrame, CFrame.new(targetPart.Position))
-        Library:Notify("Silent Aim", "Menembak (Sandbox) -> " .. targetPlayer.DisplayName, 1.5)
+        Library:Notify("Silent Aim", "Shooting (Sandbox) -> " .. targetPlayer.DisplayName, 1.5)
     elseif shootGunRemote and shootGunRemote:IsA("RemoteFunction") then
         shootGunRemote:InvokeServer(1, targetPart.Position, "AH2")
-        Library:Notify("Silent Aim", "Menembak (Original) -> " .. targetPlayer.DisplayName, 1.5)
+        Library:Notify("Silent Aim", "Shooting (Original) -> " .. targetPlayer.DisplayName, 1.5)
     else
-        Library:Notify("Silent Aim", "Remote tembakan tidak terdeteksi di dalam Pistol.", 2)
+        Library:Notify("Silent Aim", "Shooting Remote not detected in Gun.", 2)
     end
 end
 
 -- ========================================================
 -- [[ METAMETHOD FIRE & INVOKE HOOKS (PERSISTENT PASSIVE) ]]
 -- ========================================================
--- Hook ini mengamankan tembakan manual Anda saat mengeklik layar biasa agar pelurunya ikut berbelok secara pasif.
+-- Intercepts passive manual clicking/shooting to redirect bullet parameters to target.
 pcall(function()
     local OldFireServer
     OldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
@@ -648,20 +658,19 @@ pcall(function()
     end)
 end)
 
--- Loop Utama Tembak Otomatis (Auto Shoot Loop)
+-- Main Auto Shoot loop thread
 task.spawn(function()
     while true do
-        task.wait(0.05) -- Deteksi cepat setiap 0.05 detik
+        task.wait(0.05) -- Fast check rate
         if Settings.SilentAimEnabled and Settings.AutoShootEnabled then
             local char = LocalPlayer.Character
-            -- Pistol harus sedang dipegang oleh karakter agar skrip menembak otomatis
             local gun = char and char:FindFirstChild("Gun")
             if gun then
                 local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
                 local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
                 if targetPart then
                     FireGunAtTarget()
-                    task.wait(0.3) -- Cooldown aman antar tembakan otomatis
+                    task.wait(0.3) -- Cooldown for auto shooting
                 end
             end
         end
@@ -1323,13 +1332,13 @@ local function SafeFlingSheriffAndGrab()
     local root = char and char:FindFirstChild("HumanoidRootPart")
     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
     if not root or not humanoid or humanoid.Health <= 0 then 
-        Library:Notify("Fling + Grab", "Karakter tidak siap atau mati.", 2)
+        Library:Notify("Fling + Grab", "Character not ready or is dead.", 2)
         return 
     end
     
     local target = GetTargetByRole("Sheriff")
     if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then
-        Library:Notify("Fling + Grab", "Sheriff tidak ditemukan atau sudah mati.", 2.5)
+        Library:Notify("Fling + Grab", "Sheriff not found or already eliminated.", 2.5)
         return
     end
     
@@ -1338,33 +1347,60 @@ local function SafeFlingSheriffAndGrab()
     local originalPos = root.CFrame
     local originalFlingState = Settings.TouchFling
     
-    Library:Notify("Fling + Grab", "Memulai Fling Sheriff...", 1.5)
+    Library:Notify("Fling + Grab", "Starting Fling Sheriff... Max 5 seconds.", 2)
     
-    -- 1. AKTIFKAN TOUCH FLING DAN TELEPORT KE SHERIFF SELAMA 0.7 DETIK
+    -- Save our safety position in case we fall
+    SavePosition()
+    
+    -- 1. ENABLE TOUCH FLING, CHASE TARGET FOR MAX 5 SECONDS OR UNTIL SUCCESSFUL FLING
     Settings.TouchFling = true
     local flingStartTime = os.clock()
-    while os.clock() - flingStartTime < 0.7 do
+    
+    -- Maintain a temporary noclip connection during the fling sequence to prevent physical impact death
+    local collisionConn
+    collisionConn = RunService.Stepped:Connect(function()
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end)
+    
+    while os.clock() - flingStartTime < 5.0 do
         if not targetRoot or not targetHum or targetHum.Health <= 0 or humanoid.Health <= 0 then
             break
         end
-        -- Matikan colission agar bisa menembus & mentransfer velocity fling
-        for _, child in ipairs(char:GetDescendants()) do
-            if child:IsA("BasePart") then child.CanCollide = false end
+        
+        -- Dynamic Fling Success Check: Break early if Sheriff's physical velocity launches them or they are dead
+        if targetRoot.AssemblyLinearVelocity.Magnitude > 150 or targetRoot.Position.Y < -80 then
+            Library:Notify("Fling + Grab", "Sheriff successfully flung!", 1.5)
+            break
         end
-        root.CFrame = targetRoot.CFrame * CFrame.new(math.random(-1, 1) * 0.1, 0, math.random(-1, 1) * 0.1)
+        
+        -- Fallback Anti-void protection during flinging sequence
+        if root.Position.Y < -80 then
+            root.CFrame = originalPos
+            root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            task.wait(0.1)
+        end
+        
+        root.CFrame = targetRoot.CFrame * CFrame.new(math.random(-1, 1) * 0.15, 0, math.random(-1, 1) * 0.15)
         task.wait(0.02)
     end
     
-    -- 2. MATIKAN TOUCH FLING AGAR TIDAK MENGEFLING INNOCENT, LALU SEMBUNYI DI INNOCENT LAIN
+    if collisionConn then collisionConn:Disconnect() end
     Settings.TouchFling = false
     root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
     root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
     
-    Library:Notify("Fling + Grab", "Sheriff difling! Bersembunyi di dekat Innocent...", 2)
+    -- 2. TELEPORT TO SAFETY WHILE TARGET IS IN ORBIT & WAIT FOR THE GUN TO DROP
+    Library:Notify("Fling + Grab", "Teleporting to safety... Waiting for Gun Drop.", 2)
     TeleportToSafeInnocent()
     task.wait(0.2)
     
-    -- 3. TUNGGU SHERIFF MATI & GUN DROP MUNCUL (TIMEOUT 7 DETIK)
+    -- 3. SCAN FOR WORKSPACE GUN DROP (TIMEOUT 7 SECONDS)
     local grabStartTime = os.clock()
     local gunGrabbed = false
     while os.clock() - grabStartTime < 7 do
@@ -1372,17 +1408,22 @@ local function SafeFlingSheriffAndGrab()
         
         local activeGun = ScanForDroppedGun()
         if activeGun then
-            Library:Notify("Fling + Grab", "Pistol terdeteksi! Mengambil pistol...", 1.5)
+            Library:Notify("Fling + Grab", "Dropped Gun detected! Grabbing...", 1.5)
             
-            -- Matikan colission agar lancar mengambil pistol
-            for _, child in ipairs(char:GetDescendants()) do
-                if child:IsA("BasePart") then child.CanCollide = false end
-            end
+            local grabCollisionConn = RunService.Stepped:Connect(function()
+                if char then
+                    for _, part in ipairs(char:GetDescendants()) do
+                        if part:IsA("BasePart") then part.CanCollide = false end
+                    end
+                end
+            end)
             
             root.CFrame = activeGun.CFrame + Vector3.new(0, 1.5, 0)
             task.wait(0.3)
             
-            -- 4. SETELAH AMBIL PISTOL, TELEPORT KEMBALI KE INNOCENT AMAN
+            if grabCollisionConn then grabCollisionConn:Disconnect() end
+            
+            -- 4. TELEPORT SECURELY BACK TO SAFE INNOCENT POST-GRAB
             TeleportToSafeInnocent()
             gunGrabbed = true
             break
@@ -1390,12 +1431,12 @@ local function SafeFlingSheriffAndGrab()
         task.wait(0.1)
     end
     
-    -- Pastikan kembali aman di innocent jika loop selesai tanpa terambil
+    -- Teleport fallback in case grabbing fails or times out
     if not gunGrabbed then
         TeleportToSafeInnocent()
-        Library:Notify("Fling + Grab", "Sheriff tereliminasi, namun pistol gagal diambil atau tidak jatuh.", 3)
+        Library:Notify("Fling + Grab", "Fling finished, but Gun failed to collect or did not drop.", 3)
     else
-        Library:Notify("Fling + Grab", "Berhasil melumpuhkan Sheriff dan mengambil Pistol!", 3)
+        Library:Notify("Fling + Grab", "Sheriff neutralized and Gun successfully retrieved!", 3)
     end
     
     root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
@@ -1756,8 +1797,9 @@ end
 local ActiveTracers = {}
 local function ClearAllTracers()
     for _, tracer in pairs(ActiveTracers) do
+        -- Ensure drawings are disconnected/removed correctly
         tracer.Visible = false
-        tracer:Remove()
+        pcall(function() tracer:Remove() end)
     end
     table.clear(ActiveTracers)
 end
