@@ -63,7 +63,7 @@ local ExtButtonTexts = {
 
 -- ========================================================================
 -- [[ EXTERNAL UTILITY BUTTONS & SCALE ENGINE ]]
--- ========================================================================
+-- ========================================================
 local ExternalButtonsList = {}
 
 local function RegisterExternalButton(btnWrapper)
@@ -559,8 +559,6 @@ end))
 -- ========================================================================
 -- [[ UNIVERSAL SHERIFF FIRE & SILENT AIM ENGINE ]]
 -- ========================================================================
--- Fungsi pembantu penembak jitu universal. Memakai jalur pintas jaringan (Remote Bypass)
--- untuk menembak target langsung dari server secara instan dan akurat.
 local function FireGunAtTarget()
     local char = LocalPlayer.Character
     local backpack = LocalPlayer:FindFirstChild("Backpack")
@@ -1318,73 +1316,65 @@ local function FlingPlayer(targetPlayer)
 end
 
 -- ========================================================================
--- [[ FLING SHERIFF + GRAB GUN (UPDATED SAFE TELEPORT) ]]
+-- [[ FLING SHERIFF + GRAB GUN (UPDATED STEALTH TELEPORT) ]]
 -- ========================================================================
 local function SafeFlingSheriffAndGrab()
     local char = LocalPlayer.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
     if not root or not humanoid or humanoid.Health <= 0 then 
-        Library:Notify("Fling + Grab", "Character not ready or is dead.", 2)
+        Library:Notify("Fling + Grab", "Karakter tidak siap atau mati.", 2)
         return 
     end
     
     local target = GetTargetByRole("Sheriff")
     if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then
-        Library:Notify("Fling + Grab", "Sheriff not found or already eliminated.", 2.5)
+        Library:Notify("Fling + Grab", "Sheriff tidak ditemukan atau sudah mati.", 2.5)
         return
     end
     
     local targetRoot = target.Character.HumanoidRootPart
     local targetHum = target.Character:FindFirstChildOfClass("Humanoid")
-    
     local originalPos = root.CFrame
     local originalFlingState = Settings.TouchFling
     
-    Library:Notify("Fling + Grab", "Starting Fling Sheriff... Stay safe.", 2)
+    Library:Notify("Fling + Grab", "Memulai Fling Sheriff...", 1.5)
     
+    -- 1. AKTIFKAN TOUCH FLING DAN TELEPORT KE SHERIFF SELAMA 0.7 DETIK
     Settings.TouchFling = true
-    
-    local flingSuccess = false
-    local startTime = os.clock()
-    while os.clock() - startTime < 3.5 do
-        if not targetRoot or not targetHum or targetHum.Health <= 0 then
-            flingSuccess = true
+    local flingStartTime = os.clock()
+    while os.clock() - flingStartTime < 0.7 do
+        if not targetRoot or not targetHum or targetHum.Health <= 0 or humanoid.Health <= 0 then
             break
         end
-        if not root or humanoid.Health <= 0 then
-            break
-        end
-        
-        if root.Position.Y < -80 then
-            root.CFrame = originalPos
-            task.wait(0.1)
-        end
-        
+        -- Matikan colission agar bisa menembus & mentransfer velocity fling
         for _, child in ipairs(char:GetDescendants()) do
             if child:IsA("BasePart") then child.CanCollide = false end
         end
-        
-        root.CFrame = targetRoot.CFrame * CFrame.new(math.random(-1, 1) * 0.12, 0, math.random(-1, 1) * 0.12)
+        root.CFrame = targetRoot.CFrame * CFrame.new(math.random(-1, 1) * 0.1, 0, math.random(-1, 1) * 0.1)
         task.wait(0.02)
     end
     
-    Settings.TouchFling = originalFlingState
+    -- 2. MATIKAN TOUCH FLING AGAR TIDAK MENGEFLING INNOCENT, LALU SEMBUNYI DI INNOCENT LAIN
+    Settings.TouchFling = false
     root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
     root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
     
-    -- Teleport safely to an innocent player far from the murderer
+    Library:Notify("Fling + Grab", "Sheriff difling! Bersembunyi di dekat Innocent...", 2)
     TeleportToSafeInnocent()
-    task.wait(0.1)
+    task.wait(0.2)
     
-    Library:Notify("Fling + Grab", "Fling finished! Scanning for dropped gun...", 2)
+    -- 3. TUNGGU SHERIFF MATI & GUN DROP MUNCUL (TIMEOUT 7 DETIK)
     local grabStartTime = os.clock()
     local gunGrabbed = false
-    while os.clock() - grabStartTime < 5 do
+    while os.clock() - grabStartTime < 7 do
+        if humanoid.Health <= 0 then break end
+        
         local activeGun = ScanForDroppedGun()
         if activeGun then
-            Library:Notify("Fling + Grab", "Dropped gun detected! Snatching immediately...", 1.5)
+            Library:Notify("Fling + Grab", "Pistol terdeteksi! Mengambil pistol...", 1.5)
             
+            -- Matikan colission agar lancar mengambil pistol
             for _, child in ipairs(char:GetDescendants()) do
                 if child:IsA("BasePart") then child.CanCollide = false end
             end
@@ -1392,7 +1382,7 @@ local function SafeFlingSheriffAndGrab()
             root.CFrame = activeGun.CFrame + Vector3.new(0, 1.5, 0)
             task.wait(0.3)
             
-            -- Teleport to safe innocent
+            -- 4. SETELAH AMBIL PISTOL, TELEPORT KEMBALI KE INNOCENT AMAN
             TeleportToSafeInnocent()
             gunGrabbed = true
             break
@@ -1400,37 +1390,21 @@ local function SafeFlingSheriffAndGrab()
         task.wait(0.1)
     end
     
-    TeleportToSafeInnocent()
+    -- Pastikan kembali aman di innocent jika loop selesai tanpa terambil
+    if not gunGrabbed then
+        TeleportToSafeInnocent()
+        Library:Notify("Fling + Grab", "Sheriff tereliminasi, namun pistol gagal diambil atau tidak jatuh.", 3)
+    else
+        Library:Notify("Fling + Grab", "Berhasil melumpuhkan Sheriff dan mengambil Pistol!", 3)
+    end
+    
     root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
     root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-    
-    if gunGrabbed then
-        Library:Notify("Fling + Grab", "Successfully neutralized Sheriff and retrieved the Gun!", 3)
-    else
-        Library:Notify("Fling + Grab", "Sheriff neutralized, but Gun failed to collect or did not drop.", 3)
-    end
 end
 
 -- ========================================================================
 -- [[ MOBILITY PHYSICS ENGINE (FLY, NOCLIP, SPEED, JUMP) ]]
 -- ========================================================================
-local SpinVelocity
-local FlingVelocity
-
--- Centralized Noclip Management
-SafeConnect(RunService.Stepped, LPH_NO_VIRTUALIZE(function()
-    if (Settings.NoclipEnabled or Settings.CoinFarmEnabled or IsGrabbing) and LocalPlayer.Character then
-        local isFlingingInFarm = Settings.CoinFarmEnabled and IsFlingingFromFarm
-        if not isFlingingInFarm then
-            for _, child in ipairs(LocalPlayer.Character:GetDescendants()) do
-                if child:IsA("BasePart") and child.CanCollide then 
-                    child.CanCollide = false 
-                end
-            end
-        end
-    end
-end))
-
 local function ToggleNoclip(state)
     Settings.NoclipEnabled = state
     if not state and LocalPlayer.Character and not Settings.CoinFarmEnabled then
