@@ -436,7 +436,7 @@ local function GetTargetForMurderer()
                     local ScreenPos, OnScreen = Camera:WorldToViewportPoint(Root.Position)
                     if OnScreen then
                         local Magnitude = (Vector2.new(ScreenPos.X, ScreenPos.Y) - CenterScreen).Magnitude
-                        if Magnitude <= Settings.FOVSize and Magnitude < ShortestDistance then
+                        if Magnitude <= Settings.FOVSize && Magnitude < ShortestDistance then
                             ShortestDistance = Magnitude
                             Target = Root
                         end
@@ -464,7 +464,7 @@ local function GetTargetForInnocentOrSheriff()
                     local ScreenPos, OnScreen = Camera:WorldToViewportPoint(Root.Position)
                     if OnScreen then
                         local Magnitude = (Vector2.new(ScreenPos.X, ScreenPos.Y) - CenterScreen).Magnitude
-                        if Magnitude <= Settings.FOVSize and Magnitude < ShortestDistance then
+                        if Magnitude <= Settings.FOVSize && Magnitude < ShortestDistance then
                             ShortestDistance = Magnitude
                             Target = Root
                         end
@@ -478,7 +478,7 @@ end
 
 -- Teleport to an innocent player located furthest away from the Murderer
 local function TeleportToSafeInnocent(maxDistance)
-    maxDistance = maxDistance or Settings.FlingGrabTpDistance or 500
+    maxDistance = maxDistance or Settings.FlingGrabTpDistance or 250
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return end
     
@@ -486,14 +486,17 @@ local function TeleportToSafeInnocent(maxDistance)
     local bestTarget = nil
     local maxDistanceFound = -1
     
+    -- Keep a reference to our current position before we teleport
+    local originalPos = root.Position
+    
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
             local role = GetMM2Role(p)
             if role == "Innocent" then
                 local tRoot = p.Character.HumanoidRootPart
-                local distanceToMe = (root.Position - tRoot.Position).Magnitude
+                local distanceToMe = (originalPos - tRoot.Position).Magnitude
                 
-                -- Verify if the innocent is within our selected slider limit
+                -- Verify if the innocent is strictly within our selected slider limit
                 if distanceToMe <= maxDistance then
                     local distToMurderer = 1000
                     if murderer and murderer.Character and murderer.Character:FindFirstChild("HumanoidRootPart") then
@@ -1375,10 +1378,16 @@ local function FlingPlayer(targetPlayer)
                     break
                 end
                 
-                -- Dynamic high-speed orbit math positioning to bypass knives or shots
-                orbitAngle = (orbitAngle + 0.8) % (math.pi * 2)
-                local offset = Vector3.new(math.cos(orbitAngle) * 3.5, 0, math.sin(orbitAngle) * 3.5)
+                -- Dynamic high-speed orbit math positioning (Brutal Orbit Adjustment)
+                orbitAngle = (orbitAngle + 1.2) % (math.pi * 2)
+                local radius = math.sin(orbitAngle * 4) * 1.5 + 2.0 -- Rapid jackhammer oscillation between 0.5 - 3.5 studs
+                local offset = Vector3.new(math.cos(orbitAngle) * radius, math.sin(orbitAngle * 2) * 1.2, math.sin(orbitAngle) * radius)
                 root.CFrame = CFrame.new(targetRoot.Position + offset)
+                
+                -- Force massive velocity vector to guarantee instant fling on collision
+                local multiplier = Settings.FlingPower * 2000
+                root.AssemblyLinearVelocity = Vector3.new(multiplier, multiplier, multiplier)
+                root.AssemblyAngularVelocity = Vector3.new(0, multiplier, 0)
                 
                 task.wait(0.02)
             end
@@ -1459,6 +1468,11 @@ local function SafeFlingSheriffAndGrab()
         local offset = Vector3.new(math.cos(orbitAngle) * radius, math.sin(orbitAngle * 2) * 1.2, math.sin(orbitAngle) * radius)
         root.CFrame = CFrame.new(targetRoot.Position + offset)
         
+        -- Force massive velocity vector to guarantee instant fling on collision
+        local multiplier = Settings.FlingPower * 2000
+        root.AssemblyLinearVelocity = Vector3.new(multiplier, multiplier, multiplier)
+        root.AssemblyAngularVelocity = Vector3.new(0, multiplier, 0)
+        
         task.wait(0.02)
     end
     
@@ -1495,7 +1509,7 @@ local function SafeFlingSheriffAndGrab()
             
             if grabCollisionConn then grabCollisionConn:Disconnect() end
             
-            -- 4. TELEPORT SECURELY BACK TO SAFE INNOCENT POST-GRAB
+            -- 4. TELEPORT SECURELY BACK TO SAFE INNOCENT POST-GRAB (Respects Safety Slider Radius)
             TeleportToSafeInnocent(Settings.FlingGrabTpDistance)
             gunGrabbed = true
             break
@@ -1791,7 +1805,7 @@ task.spawn(function()
                     local tRoot = targetPlayer.Character.HumanoidRootPart
                     local orbitAngle = 0
                     
-                    -- Actively Orbit target at high speed to bypass potential shots or knives (Brutal adjustment)
+                    -- Actively Orbit target at high speed to bypass potential shots or knives (Brutal Orbit Adjustment)
                     while targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") and (Settings.AutoFlingMurder or Settings.AutoFlingSheriff) do
                         if humanoid.Health <= 0 then break end
                         orbitAngle = (orbitAngle + 1.2) % (math.pi * 2)
@@ -2029,7 +2043,7 @@ end))
 
 -- ========================================================================
 -- [[ EARLY ROLE DETECTION (BACKPACK & CHAR LISTENER) ]]
--- ========================================================================
+-- ========================================================
 local function MonitorRolesForEarlyDetect(player)
     if player == LocalPlayer then return end
     
@@ -2410,7 +2424,9 @@ local AimbotDropdown
 
 AimbotDropdown = TabCombat:CreateDropdown("Aimbot Targeting Mode", {"Normal", "Instant"}, "Instant", function(selected)
     Settings.AimbotType = selected
-    ToggleUiVisibility(SmoothingSlider, selected == "Normal")
+    if SmoothingSlider then
+        ToggleUiVisibility(SmoothingSlider, selected == "Normal")
+    end
 end)
 
 SmoothingSlider = TabCombat:CreateSlider("Aimbot Smoothing speed %", 1, 100, 15, function(val)
