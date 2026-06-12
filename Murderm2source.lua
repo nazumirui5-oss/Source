@@ -65,7 +65,7 @@ local ExtButtonTexts = {
 
 -- ========================================================================
 -- [[ EXTERNAL UTILITY BUTTONS & SCALE ENGINE ]]
--- ========================================================
+-- ========================================================================
 local ExternalButtonsList = {}
 
 local function RegisterExternalButton(btnWrapper)
@@ -178,7 +178,8 @@ local Settings = {
     AutoShootEnabled = false,
     SilentAimType = "Normal", -- "Normal" or "Instant"
     AimbotType = "Instant", -- "Instant" or "Normal"
-    AimbotSmoothingValue = 0.15
+    AimbotSmoothingValue = 0.15,
+    FlingGrabTpDistance = 250 -- Distance limit slider for safety teleports
 }
 
 local OriginalFOV = Camera.FieldOfView
@@ -476,34 +477,61 @@ local function GetTargetForInnocentOrSheriff()
 end
 
 -- Teleport to an innocent player located furthest away from the Murderer
-local function TeleportToSafeInnocent()
+local function TeleportToSafeInnocent(maxDistance)
+    maxDistance = maxDistance or Settings.FlingGrabTpDistance or 500
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return end
     
     local murderer = GetTargetByRole("Murderer")
     local bestTarget = nil
-    local maxDistance = -1
+    local maxDistanceFound = -1
     
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
             local role = GetMM2Role(p)
             if role == "Innocent" then
                 local tRoot = p.Character.HumanoidRootPart
-                local dist = 1000 -- Safe high-value fallback
-                if murderer and murderer.Character and murderer.Character:FindFirstChild("HumanoidRootPart") then
-                    dist = (tRoot.Position - murderer.Character.HumanoidRootPart.Position).Magnitude
-                end
+                local distanceToMe = (root.Position - tRoot.Position).Magnitude
                 
-                if dist > maxDistance then
-                    maxDistance = dist
-                    bestTarget = tRoot
+                -- Verify if the innocent is within our selected slider limit
+                if distanceToMe <= maxDistance then
+                    local distToMurderer = 1000
+                    if murderer and murderer.Character and murderer.Character:FindFirstChild("HumanoidRootPart") then
+                        distToMurderer = (tRoot.Position - murderer.Character.HumanoidRootPart.Position).Magnitude
+                    end
+                    
+                    if distToMurderer > maxDistanceFound then
+                        maxDistanceFound = distToMurderer
+                        bestTarget = tRoot
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Fallback: If no innocent is within the selected safety radius, ignore limit to keep player safe
+    if not bestTarget then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                local role = GetMM2Role(p)
+                if role == "Innocent" then
+                    local tRoot = p.Character.HumanoidRootPart
+                    local distToMurderer = 1000
+                    if murderer and murderer.Character and murderer.Character:FindFirstChild("HumanoidRootPart") then
+                        distToMurderer = (tRoot.Position - murderer.Character.HumanoidRootPart.Position).Magnitude
+                    end
+                    
+                    if distToMurderer > maxDistanceFound then
+                        maxDistanceFound = distToMurderer
+                        bestTarget = tRoot
+                    end
                 end
             end
         end
     end
     
     if bestTarget then
-        -- Teleport 3.5 studs above the target to avoid clipping through boundaries
+        -- Teleport 3.5 studs above the target to avoid clipping through ground boundaries
         root.CFrame = bestTarget.CFrame * CFrame.new(0, 3.5, 0)
         root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
         root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
@@ -560,14 +588,16 @@ SafeConnect(RunService.RenderStepped, LPH_NO_VIRTUALIZE(function()
             local TargetPart = (MyRole == "Murderer") and GetTargetForMurderer() or GetTargetForInnocentOrSheriff()
             
             if TargetPart then
-                local PredictedPos = GetPredictedPosition(TargetPart)
-                if PredictedPos then
-                    local targetCFrame = CFrame.lookAt(Camera.CFrame.Position, PredictedPos)
-                    if Settings.AimbotType == "Instant" then
-                        Camera.CFrame = targetCFrame
-                    else
-                        Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, Settings.AimbotSmoothingValue)
+                if Settings.AimbotType == "Instant" then
+                    -- Instant Mode: Snap lock instantly using speed prediction
+                    local PredictedPos = GetPredictedPosition(TargetPart)
+                    if PredictedPos then
+                        Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, PredictedPos)
                     end
+                else
+                    -- Normal Mode: Aim smoothly directly at the player without speed prediction
+                    local targetCFrame = CFrame.lookAt(Camera.CFrame.Position, TargetPart.Position)
+                    Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, Settings.AimbotSmoothingValue)
                 end
             end
         end
@@ -1368,13 +1398,13 @@ local function SafeFlingSheriffAndGrab()
     local root = char and char:FindFirstChild("HumanoidRootPart")
     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
     if not root or not humanoid or humanoid.Health <= 0 then 
-        Library:Notify("Fling + Grab", "Character not ready or is dead.", 2)
+        Library:Notify("Fling + Grab", "Karakter tidak siap atau mati.", 2)
         return 
     end
     
     local target = GetTargetByRole("Sheriff")
     if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then
-        Library:Notify("Fling + Grab", "Sheriff not found or already eliminated.", 2.5)
+        Library:Notify("Fling + Grab", "Sheriff tidak ditemukan atau sudah mati.", 2.5)
         return
     end
     
@@ -1383,7 +1413,7 @@ local function SafeFlingSheriffAndGrab()
     local originalPos = root.CFrame
     local originalFlingState = Settings.TouchFling
     
-    Library:Notify("Fling + Grab", "Starting Fling Sheriff... Max 5 seconds.", 2)
+    Library:Notify("Fling + Grab", "Memulai Fling Sheriff...", 1.5)
     
     -- Save our safety position in case we fall
     SavePosition()
@@ -1423,9 +1453,10 @@ local function SafeFlingSheriffAndGrab()
             task.wait(0.1)
         end
         
-        -- High-speed orbit rotation around the Sheriff so they can't shoot us
-        orbitAngle = (orbitAngle + 0.8) % (math.pi * 2)
-        local offset = Vector3.new(math.cos(orbitAngle) * 3.5, 0, math.sin(orbitAngle) * 3.5)
+        -- High-speed orbit rotation around the Sheriff so they can't shoot us (Brutal Orbit Adjustment)
+        orbitAngle = (orbitAngle + 1.2) % (math.pi * 2)
+        local radius = math.sin(orbitAngle * 4) * 1.5 + 2.0 -- Osilasi radius 0.5 - 3.5 stud untuk benturan brutal
+        local offset = Vector3.new(math.cos(orbitAngle) * radius, math.sin(orbitAngle * 2) * 1.2, math.sin(orbitAngle) * radius)
         root.CFrame = CFrame.new(targetRoot.Position + offset)
         
         task.wait(0.02)
@@ -1438,7 +1469,7 @@ local function SafeFlingSheriffAndGrab()
     
     -- 2. TELEPORT TO SAFETY WHILE TARGET IS IN ORBIT & WAIT FOR THE GUN TO DROP
     Library:Notify("Fling + Grab", "Teleporting to safety... Waiting for Gun Drop.", 2)
-    TeleportToSafeInnocent()
+    TeleportToSafeInnocent(Settings.FlingGrabTpDistance)
     task.wait(0.2)
     
     -- 3. SCAN FOR WORKSPACE GUN DROP (TIMEOUT 7 SECONDS)
@@ -1465,7 +1496,7 @@ local function SafeFlingSheriffAndGrab()
             if grabCollisionConn then grabCollisionConn:Disconnect() end
             
             -- 4. TELEPORT SECURELY BACK TO SAFE INNOCENT POST-GRAB
-            TeleportToSafeInnocent()
+            TeleportToSafeInnocent(Settings.FlingGrabTpDistance)
             gunGrabbed = true
             break
         end
@@ -1474,7 +1505,7 @@ local function SafeFlingSheriffAndGrab()
     
     -- Teleport fallback in case grabbing fails or times out
     if not gunGrabbed then
-        TeleportToSafeInnocent()
+        TeleportToSafeInnocent(Settings.FlingGrabTpDistance)
         Library:Notify("Fling + Grab", "Fling finished, but Gun failed to collect or did not drop.", 3)
     else
         Library:Notify("Fling + Grab", "Sheriff neutralized and Gun successfully retrieved!", 3)
@@ -1586,9 +1617,16 @@ end))
 SafeConnect(RunService.RenderStepped, LPH_NO_VIRTUALIZE(function()
     local char = LocalPlayer.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
-    if root and Settings.TouchFling then
-        root.AssemblyLinearVelocity = originalVelocity
-        root.AssemblyAngularVelocity = originalRotVelocity
+    if root then
+        if Settings.TouchFling then
+            root.AssemblyLinearVelocity = originalVelocity
+            root.AssemblyAngularVelocity = originalRotVelocity
+        else
+            if lastTouchFlingState then
+                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+            end
+        end
     end
 end))
 
@@ -1753,11 +1791,12 @@ task.spawn(function()
                     local tRoot = targetPlayer.Character.HumanoidRootPart
                     local orbitAngle = 0
                     
-                    -- Actively Orbit target at high speed to bypass potential shots or knives
+                    -- Actively Orbit target at high speed to bypass potential shots or knives (Brutal adjustment)
                     while targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") and (Settings.AutoFlingMurder or Settings.AutoFlingSheriff) do
                         if humanoid.Health <= 0 then break end
-                        orbitAngle = (orbitAngle + 0.8) % (math.pi * 2)
-                        local offset = Vector3.new(math.cos(orbitAngle) * 3.5, 0, math.sin(orbitAngle) * 3.5)
+                        orbitAngle = (orbitAngle + 1.2) % (math.pi * 2)
+                        local radius = math.sin(orbitAngle * 4) * 1.5 + 2.0
+                        local offset = Vector3.new(math.cos(orbitAngle) * radius, math.sin(orbitAngle * 2) * 1.2, math.sin(orbitAngle) * radius)
                         root.CFrame = CFrame.new(tRoot.Position + offset)
                         root.AssemblyLinearVelocity = Vector3.new(99999, 99999, 99999)
                         root.AssemblyAngularVelocity = Vector3.new(0, 99999, 0)
@@ -1843,7 +1882,7 @@ local ActiveTracers = {}
 local function ClearAllTracers()
     for _, tracer in pairs(ActiveTracers) do
         tracer.Visible = false
-        pcall(function() tracer:Remove() end)
+        tracer:Remove()
     end
     table.clear(ActiveTracers)
 end
@@ -2299,9 +2338,36 @@ TabCombat:CreateButton("Teleport & Stack All Players to Me", function()
     Library:Notify("Combat Teleport", "Stacked all players for easy kill!", 2.5)
 end)
 
+-- Dynamic element visibility handlers to prevent script crashes
+local function ToggleUiVisibility(element, state)
+    pcall(function()
+        if element then
+            if element.SetVisible then
+                element:SetVisible(state)
+            elseif typeof(element) == "Instance" then
+                element.Visible = state
+            elseif type(element) == "table" and element.Instance then
+                element.Instance.Visible = state
+            end
+        end
+    end)
+end
+
 TabCombat:CreateParagraph("Touch Fling (Collision System)", "Instant physical rotation style when character touches the enemy.")
-TabCombat:CreateToggle("Activate Touch Fling", false, function(state)
+local TouchFlingToggle = TabCombat:CreateToggle("Activate Touch Fling", false, function(state)
     Settings.TouchFling = state
+    if not state then
+        task.spawn(function()
+            for i = 1, 5 do
+                local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                end
+                task.wait(0.02)
+            end
+        end)
+    end
 end)
 
 TabCombat:CreateSlider("Fling Velocity Power multiplier", 1, 200, Settings.FlingPower, function(val)
@@ -2339,13 +2405,20 @@ local AimbotToggle = TabCombat:CreateToggle("Aim Assist Lock (Holding Gun/Knife)
     Settings.CameraAimbot = state
 end)
 
-TabCombat:CreateDropdown("Aimbot Targeting Mode", {"Normal", "Instant"}, "Instant", function(selected)
+local SmoothingSlider
+local AimbotDropdown
+
+AimbotDropdown = TabCombat:CreateDropdown("Aimbot Targeting Mode", {"Normal", "Instant"}, "Instant", function(selected)
     Settings.AimbotType = selected
+    ToggleUiVisibility(SmoothingSlider, selected == "Normal")
 end)
 
-TabCombat:CreateSlider("Aimbot Smoothing speed %", 1, 100, 15, function(val)
+SmoothingSlider = TabCombat:CreateSlider("Aimbot Smoothing speed %", 1, 100, 15, function(val)
     Settings.AimbotSmoothingValue = val / 100
 end)
+
+-- Initialize dynamic Aimbot Smoothing Slider visibility
+ToggleUiVisibility(SmoothingSlider, Settings.AimbotType == "Normal")
 
 TabCombat:CreateToggle("Show Master Aimbot Button [A]", false, function(state)
     Settings.AimbotExtEnabled = state
@@ -2641,6 +2714,10 @@ TabSpecial:CreateParagraph("Fling Glitches", "Violent rotation engine designed t
 
 TabSpecial:CreateButton("Safe Fling Sheriff + Instant Grab Gun", function()
     SafeFlingSheriffAndGrab()
+end)
+
+TabSpecial:CreateSlider("Fling-Grab Safety Distance (Studs)", 1, 500, 250, function(val)
+    Settings.FlingGrabTpDistance = val
 end)
 
 TabSpecial:CreateToggle("Show Fling & Grab Button [FG]", false, function(state)
