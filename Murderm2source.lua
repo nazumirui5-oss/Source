@@ -61,7 +61,7 @@ local ExtButtonTexts = {
     SilentAim = "S_AIM"
 }
 
--- ========================================================================
+-- ========================================================
 -- [[ EXTERNAL UTILITY BUTTONS & SCALE ENGINE ]]
 -- ========================================================
 local ExternalButtonsList = {}
@@ -149,7 +149,7 @@ local Settings = {
 
     -- Additional Integration Features
     InfiniteJump = false,
-    AntiVoid = true, -- Enabled by default to protect player
+    AntiVoid = true, -- Auto enabled by default to secure the player from falling
     AntiFling = false,
     TouchFling = false,
     FlingPower = 100,
@@ -173,7 +173,7 @@ local Settings = {
     JumpBoostValue = 35,
     SilentAimEnabled = false,
     SilentAimExtEnabled = false,
-    AutoShootEnabled = false -- Auto Shoot Feature
+    AutoShootEnabled = false -- Auto Shoot Feature Toggle
 }
 
 local OriginalFOV = Camera.FieldOfView
@@ -498,12 +498,12 @@ local function TeleportToSafeInnocent()
     end
     
     if bestTarget then
-        -- Teleport 3.5 studs above the target to completely prevent clipping underground
+        -- Teleport 3.5 studs above the target to avoid clipping through boundaries
         root.CFrame = bestTarget.CFrame * CFrame.new(0, 3.5, 0)
         root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
         root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         
-        -- Anchor briefly to let Roblox collision engine load correctly
+        -- Anchor briefly to allow Roblox collision engine to load safely
         root.Anchored = true
         task.wait(0.15)
         root.Anchored = false
@@ -567,8 +567,7 @@ end))
 -- ========================================================================
 -- [[ UNIVERSAL SHERIFF FIRE & SILENT AIM ENGINE ]]
 -- ========================================================================
--- Universal firing handler. Employs direct network triggers (Remote Bypass)
--- to shoot targets instantly on the server with perfect alignment.
+-- Direct Remote Event / Remote Function trigger to shoot target directly on network level.
 local function FireGunAtTarget()
     local char = LocalPlayer.Character
     local backpack = LocalPlayer:FindFirstChild("Backpack")
@@ -588,7 +587,7 @@ local function FireGunAtTarget()
         return
     end
     
-    -- Delay cooldown to prevent spam kicks/bans
+    -- Limit firing rate to prevent network desync
     if os.clock() - lastShotTime < 0.35 then return end
     lastShotTime = os.clock()
     
@@ -619,42 +618,38 @@ local function FireGunAtTarget()
 end
 
 -- ========================================================
--- [[ METAMETHOD FIRE & INVOKE HOOKS (PERSISTENT PASSIVE) ]]
+-- [[ PASIVE SILENT AIM METAMETHOD NAMECALL HOOKS ]]
 -- ========================================================
--- Intercepts passive manual clicking/shooting to redirect bullet parameters to target.
+-- This highly accurate Hook intercepts fast-path Luau NAMECALL instructions to ensure
+-- all shoots redirect perfectly to target at C-Level without network desync.
 pcall(function()
-    local OldFireServer
-    OldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
         local args = {...}
         if not checkcaller() and Settings.SilentAimEnabled then
-            if tostring(self) == "Shoot" then
+            -- 1. Support Modded/Sandbox MM2 (RemoteEvent "Shoot")
+            if method == "FireServer" and tostring(self) == "Shoot" then
                 local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
                 local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
                 if targetPart then
+                    -- Preserve original origin CFrame to bypass server-side distance anti-cheat checks.
                     args[2] = CFrame.new(targetPart.Position)
-                    return OldFireServer(self, unpack(args))
+                    return oldNamecall(self, unpack(args))
                 end
             end
-        end
-        return OldFireServer(self, ...)
-    end)
-end)
-
-pcall(function()
-    local OldInvokeServer
-    OldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-        local args = {...}
-        if not checkcaller() and Settings.SilentAimEnabled then
-            if tostring(self) == "ShootGun" then
+            
+            -- 2. Support Original MM2 (RemoteFunction "ShootGun")
+            if method == "InvokeServer" and tostring(self) == "ShootGun" then
                 local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
                 local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
                 if targetPart then
                     args[2] = targetPart.Position
-                    return OldInvokeServer(self, unpack(args))
+                    return oldNamecall(self, unpack(args))
                 end
             end
         end
-        return OldInvokeServer(self, ...)
+        return oldNamecall(self, ...)
     end)
 end)
 
@@ -1332,13 +1327,13 @@ local function SafeFlingSheriffAndGrab()
     local root = char and char:FindFirstChild("HumanoidRootPart")
     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
     if not root or not humanoid or humanoid.Health <= 0 then 
-        Library:Notify("Fling + Grab", "Character not ready or is dead.", 2)
+        Library:Notify("Fling + Grab", "Karakter tidak siap atau mati.", 2)
         return 
     end
     
     local target = GetTargetByRole("Sheriff")
     if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then
-        Library:Notify("Fling + Grab", "Sheriff not found or already eliminated.", 2.5)
+        Library:Notify("Fling + Grab", "Sheriff tidak ditemukan atau sudah mati.", 2.5)
         return
     end
     
@@ -1347,7 +1342,7 @@ local function SafeFlingSheriffAndGrab()
     local originalPos = root.CFrame
     local originalFlingState = Settings.TouchFling
     
-    Library:Notify("Fling + Grab", "Starting Fling Sheriff... Max 5 seconds.", 2)
+    Library:Notify("Fling + Grab", "Memulai Fling Sheriff...", 1.5)
     
     -- Save our safety position in case we fall
     SavePosition()
@@ -1797,9 +1792,8 @@ end
 local ActiveTracers = {}
 local function ClearAllTracers()
     for _, tracer in pairs(ActiveTracers) do
-        -- Ensure drawings are disconnected/removed correctly
         tracer.Visible = false
-        pcall(function() tracer:Remove() end)
+        tracer:Remove()
     end
     table.clear(ActiveTracers)
 end
