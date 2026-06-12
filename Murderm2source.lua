@@ -61,7 +61,8 @@ local ExtButtonTexts = {
     SafeZone = "SAFE_ZONE",
     FlingGrab = "FS_GRAB",
     JumpBoost = "J_BOOST",
-    SilentAim = "S_AIM"
+    SilentAim = "S_AIM",
+    FlingAll = "FLING_ALL"
 }
 
 -- ========================================================================
@@ -180,7 +181,10 @@ local Settings = {
     SilentAimType = "Normal", -- "Normal", "Instant", or "OP"
     AimbotType = "Instant", -- "Instant" or "Normal"
     AimbotSmoothingValue = 0.15,
-    FlingGrabTpDistance = 250 -- Distance limit slider for safety teleports
+    FlingGrabTpDistance = 250, -- Distance limit slider for safety teleports
+    AutoFlingAll = false, -- Auto Fling All Players setting
+    FlingGrabTpMode = "Innocent", -- Safety teleport mode choice: "Innocent" or "Original Position"
+    AutoGrabAndShoot = false -- Auto Grab and Auto Shoot combined Sheriff flow
 }
 
 local OriginalFOV = Camera.FieldOfView
@@ -790,6 +794,33 @@ task.spawn(function()
                 if targetPart then
                     FireGunAtTarget()
                     task.wait(0.3) -- Cooldown for auto shooting
+                end
+            end
+        end
+    end
+end)
+
+-- Auto Grab dropped gun and instantly auto-shoot murderer flow loop thread
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if Settings.AutoGrabAndShoot then
+            local activeGun = ScanForDroppedGun()
+            if activeGun then
+                -- Force instant grab
+                SafeInstantTween(activeGun)
+                task.wait(0.08)
+            end
+            
+            -- If successfully grabbed and holding gun, auto shoot immediately with Silent Aim
+            local char = LocalPlayer.Character
+            local gun = char and char:FindFirstChild("Gun")
+            if gun then
+                local targetPlayer = GetTargetByRole("Murderer") or SelectedPlayer
+                local targetPart = targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if targetPart then
+                    FireGunAtTarget()
+                    task.wait(0.3)
                 end
             end
         end
@@ -1537,9 +1568,15 @@ local function SafeFlingSheriffAndGrab()
     root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
     root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
     
-    -- 2. TELEPORT TO SAFETY WHILE TARGET IS IN ORBIT & WAIT FOR THE GUN TO DROP (Respects Safety Slider Radius)
+    -- 2. TELEPORT TO SAFETY WHILE TARGET IS IN ORBIT & WAIT FOR THE GUN TO DROP (Respects Safety Slider Radius & Teleport Mode Choice)
     Library:Notify("Fling + Grab", "Teleporting to safety... Waiting for Gun Drop.", 2)
-    TeleportToSafeInnocent(Settings.FlingGrabTpDistance)
+    if Settings.FlingGrabTpMode == "Innocent" then
+        TeleportToSafeInnocent(Settings.FlingGrabTpDistance)
+    else
+        root.CFrame = originalPos
+        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+    end
     task.wait(0.2)
     
     -- 3. SCAN FOR WORKSPACE GUN DROP (TIMEOUT 7 SECONDS)
@@ -1565,8 +1602,14 @@ local function SafeFlingSheriffAndGrab()
             
             if grabCollisionConn then grabCollisionConn:Disconnect() end
             
-            -- 4. TELEPORT SECURELY BACK TO SAFE INNOCENT POST-GRAB (Respects Safety Slider Radius)
-            TeleportToSafeInnocent(Settings.FlingGrabTpDistance)
+            -- 4. TELEPORT SECURELY BACK TO SAFETY POST-GRAB (Respects Safety Slider Radius & Teleport Mode Choice)
+            if Settings.FlingGrabTpMode == "Innocent" then
+                TeleportToSafeInnocent(Settings.FlingGrabTpDistance)
+            else
+                root.CFrame = originalPos
+                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+            end
             gunGrabbed = true
             break
         end
@@ -1575,7 +1618,13 @@ local function SafeFlingSheriffAndGrab()
     
     -- Teleport fallback in case grabbing fails or times out
     if not gunGrabbed then
-        TeleportToSafeInnocent(Settings.FlingGrabTpDistance)
+        if Settings.FlingGrabTpMode == "Innocent" then
+            TeleportToSafeInnocent(Settings.FlingGrabTpDistance)
+        else
+            root.CFrame = originalPos
+            root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+        end
         Library:Notify("Fling + Grab", "Fling finished, but Gun failed to collect or did not drop.", 3)
     else
         Library:Notify("Fling + Grab", "Sheriff neutralized and Gun successfully retrieved!", 3)
@@ -1637,6 +1686,90 @@ local function ToggleNoclip(state)
                 end
             end
         end
+    end
+end
+
+-- Auto Fling All Alive Players sequence
+local function ToggleAutoFlingAll(state)
+    Settings.AutoFlingAll = state
+    if state then
+        task.spawn(function()
+            local originalPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character.HumanoidRootPart.CFrame
+            SavePosition()
+            
+            while Settings.AutoFlingAll do
+                local char = LocalPlayer.Character
+                local root = char and char:FindFirstChild("HumanoidRootPart")
+                local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+                
+                if not root or not humanoid or humanoid.Health <= 0 then
+                    task.wait(1)
+                else
+                    local flungSomeone = false
+                    for _, p in ipairs(Players:GetPlayers()) do
+                        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                            local tRoot = p.Character.HumanoidRootPart
+                            local tHum = p.Character:FindFirstChildOfClass("Humanoid")
+                            
+                            -- Verify target eligibility: Alive, not in the void, and not already flung
+                            if tHum and tHum.Health > 0 and tRoot.Position.Y > -80 and tRoot.AssemblyLinearVelocity.Magnitude < 150 then
+                                Settings.TouchFling = true
+                                local collisionConn = RunService.Stepped:Connect(function()
+                                    if char then
+                                        for _, part in ipairs(char:GetDescendants()) do
+                                            if part:IsA("BasePart") then part.CanCollide = false end
+                                        end
+                                    end
+                                end)
+                                
+                                local orbitAngle = 0
+                                local startTime = os.clock()
+                                while os.clock() - startTime < 1.5 do -- Spend 1.5s max per target player
+                                    if not tRoot or not tHum or tHum.Health <= 0 or tRoot.AssemblyLinearVelocity.Magnitude > 150 or tRoot.Position.Y < -80 or not Settings.AutoFlingAll then
+                                        break
+                                    end
+                                    orbitAngle = (orbitAngle + 1.2) % (math.pi * 2)
+                                    local radius = math.sin(orbitAngle * 4) * 1.5 + 2.0
+                                    local offset = Vector3.new(math.cos(orbitAngle) * radius, math.sin(orbitAngle * 2) * 1.2, math.sin(orbitAngle) * radius)
+                                    root.CFrame = CFrame.new(tRoot.Position + offset)
+                                    
+                                    local multiplier = Settings.FlingPower * 2000
+                                    root.AssemblyLinearVelocity = Vector3.new(multiplier, multiplier, multiplier)
+                                    root.AssemblyAngularVelocity = Vector3.new(0, multiplier, 0)
+                                    task.wait(0.02)
+                                end
+                                
+                                if collisionConn then collisionConn:Disconnect() end
+                                Settings.TouchFling = false
+                                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                                root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                                flungSomeone = true
+                                task.wait(0.1)
+                            end
+                        end
+                        if not Settings.AutoFlingAll then break end
+                    end
+                    
+                    if not flungSomeone then
+                        task.wait(0.5)
+                    end
+                end
+                task.wait(0.1)
+            end
+            
+            -- Gracefully clean up linear and angular momentum when feature is disabled
+            local char = LocalPlayer.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if root then
+                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                if originalPos then
+                    root.CFrame = originalPos
+                elseif SavedCFrame then
+                    root.CFrame = SavedCFrame
+                end
+            end
+        end)
     end
 end
 
@@ -2363,6 +2496,14 @@ local ExtSilentAimBtn = Library:CreateExternalButton("SilentAim", ExtButtonTexts
 end)
 RegisterExternalButton(ExtSilentAimBtn)
 
+-- Auto Fling All Players Floating Button
+local ExtFlingAllBtn = Library:CreateExternalButton("FlingAll", ExtButtonTexts.FlingAll, UDim2.new(0, 220, 0.5, -55), function()
+    Settings.AutoFlingAll = not Settings.AutoFlingAll
+    ToggleAutoFlingAll(Settings.AutoFlingAll)
+    Library:Notify("Auto Fling All", "Status: " .. (Settings.AutoFlingAll and "ON" or "OFF"), 1.5)
+end)
+RegisterExternalButton(ExtFlingAllBtn)
+
 ExtAimbotBtn:SetVisible(false)
 ExtGrabBtn:SetVisible(false)
 ExtDoubleJumpBtn:SetVisible(false)
@@ -2379,6 +2520,7 @@ ExtSafeZoneBtn:SetVisible(false)
 ExtFlingGrabBtn:SetVisible(false)
 ExtJumpBoostBtn:SetVisible(false)
 ExtSilentAimBtn:SetVisible(false)
+ExtFlingAllBtn:SetVisible(false)
 
 -- ========================================================================
 -- [[ MAIN MENU STRUCTURE ]]
@@ -2488,6 +2630,10 @@ end)
 
 TabCombat:CreateToggle("Auto Shoot (Otomatis Tembak)", false, function(state)
     Settings.AutoShootEnabled = state
+end)
+
+TabCombat:CreateToggle("Auto Grab & Auto Shoot (Sheriff Flow)", false, function(state)
+    Settings.AutoGrabAndShoot = state
 end)
 
 TabCombat:CreateToggle("Show Silent Aim Shooting Button [SA]", false, function(state)
@@ -2813,6 +2959,10 @@ TabSpecial:CreateButton("Safe Fling Sheriff + Instant Grab Gun", function()
     SafeFlingSheriffAndGrab()
 end)
 
+TabSpecial:CreateDropdown("Fling-Grab Safety Teleport Mode", {"Innocent", "Original Position"}, "Innocent", function(val)
+    Settings.FlingGrabTpMode = val
+end)
+
 TabSpecial:CreateSlider("Fling-Grab Safety Distance (Studs)", 1, 500, 250, function(val)
     Settings.FlingGrabTpDistance = val
 end)
@@ -2850,6 +3000,14 @@ end)
 TabSpecial:CreateToggle("Show Fling Sheriff Button [FS]", false, function(state)
     Settings.FlingSheriffExtEnabled = state
     ExtFlingSheriffBtn:SetVisible(state)
+end)
+
+TabSpecial:CreateToggle("Auto Fling All Players", false, function(state)
+    ToggleAutoFlingAll(state)
+end)
+
+TabSpecial:CreateToggle("Show Auto Fling All Button [FA]", false, function(state)
+    ExtFlingAllBtn:SetVisible(state)
 end)
 
 TabSpecial:CreateParagraph("Grab Dropped Gun", "Teleports to gun then teleports back.")
@@ -2954,6 +3112,10 @@ end)
 
 TabControls:CreateSlider("Silent Aim Button Scale", 10, 200, 100, function(val)
     SetButtonSize(ExtSilentAimBtn, val / 100)
+end)
+
+TabControls:CreateSlider("Auto Fling All Button Scale", 10, 200, 100, function(val)
+    SetButtonSize(ExtFlingAllBtn, val / 100)
 end)
 
 TabControls:CreateParagraph("Window Lock", "Lock window dragging positions.")
