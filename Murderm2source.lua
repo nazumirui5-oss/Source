@@ -65,7 +65,7 @@ local ExtButtonTexts = {
 
 -- ========================================================================
 -- [[ EXTERNAL UTILITY BUTTONS & SCALE ENGINE ]]
--- ========================================================================
+-- ========================================================
 local ExternalButtonsList = {}
 
 local function RegisterExternalButton(btnWrapper)
@@ -436,7 +436,7 @@ local function GetTargetForMurderer()
                     local ScreenPos, OnScreen = Camera:WorldToViewportPoint(Root.Position)
                     if OnScreen then
                         local Magnitude = (Vector2.new(ScreenPos.X, ScreenPos.Y) - CenterScreen).Magnitude
-                        if Magnitude <= Settings.FOVSize && Magnitude < ShortestDistance then
+                        if Magnitude <= Settings.FOVSize and Magnitude < ShortestDistance then
                             ShortestDistance = Magnitude
                             Target = Root
                         end
@@ -464,7 +464,7 @@ local function GetTargetForInnocentOrSheriff()
                     local ScreenPos, OnScreen = Camera:WorldToViewportPoint(Root.Position)
                     if OnScreen then
                         local Magnitude = (Vector2.new(ScreenPos.X, ScreenPos.Y) - CenterScreen).Magnitude
-                        if Magnitude <= Settings.FOVSize && Magnitude < ShortestDistance then
+                        if Magnitude <= Settings.FOVSize and Magnitude < ShortestDistance then
                             ShortestDistance = Magnitude
                             Target = Root
                         end
@@ -476,7 +476,7 @@ local function GetTargetForInnocentOrSheriff()
     return Target
 end
 
--- Teleport to an innocent player located furthest away from the Murderer
+-- Teleport to an innocent player located furthest away from the Murderer within configured distance limit
 local function TeleportToSafeInnocent(maxDistance)
     maxDistance = maxDistance or Settings.FlingGrabTpDistance or 250
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -486,7 +486,7 @@ local function TeleportToSafeInnocent(maxDistance)
     local bestTarget = nil
     local maxDistanceFound = -1
     
-    -- Keep a reference to our current position before we teleport
+    -- Keep reference to our current positions before safety teleport calculation starts
     local originalPos = root.Position
     
     for _, p in ipairs(Players:GetPlayers()) do
@@ -2043,7 +2043,7 @@ end))
 
 -- ========================================================================
 -- [[ EARLY ROLE DETECTION (BACKPACK & CHAR LISTENER) ]]
--- ========================================================
+-- ========================================================================
 local function MonitorRolesForEarlyDetect(player)
     if player == LocalPlayer then return end
     
