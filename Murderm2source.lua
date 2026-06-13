@@ -209,6 +209,16 @@ _G.CrosshairSettings = {
 }
 _G.CrosshairLoaded = false
 
+-- Secure image extraction helper for standard formats or parenthesized dropdown labels
+local function GetCleanImageId(id)
+    local str = tostring(id)
+    local found = str:match("ID:%s*(%d+)")
+    if found then
+        return found
+    end
+    return str:gsub("%D", "")
+end
+
 local PresetNames = {
     "Preset 1 (ID: 6877713475)", "Preset 2 (ID: 11767039030)", "Preset 3 (ID: 11763581182)",
     "Preset 4 (ID: 11816181606)", "Preset 5 (ID: 11816262829)", "Preset 6 (ID: 11894211724)",
@@ -2459,7 +2469,7 @@ local function UpdatePreviewBox()
     local style = config.Style
     
     if style == "Image" then
-        local cleanId = tostring(config.ImageId):gsub("%D", "")
+        local cleanId = GetCleanImageId(config.ImageId)
         if cleanId ~= "" then
             PreviewImage.Image = "rbxthumb://type=Asset&id=" .. cleanId .. "&w=150&h=150"
             PreviewImage.ImageColor3 = activeColor
@@ -2944,9 +2954,10 @@ TabVisuals:CreateDropdown("Crosshair Style", {"Cross", "T-Shape", "Diamond", "Ci
     _G.CrosshairSettings.Style = selected
 end)
 
+-- Dropdown khusus dengan penanganan regex agar tidak merusak angka ID
 TabVisuals:CreateDropdown("Select Preset Image ID", PresetNames, PresetNames[1], function(selectedPreset)
-    local cleanId = selectedPreset:gsub("%D", "")
-    if cleanId ~= "" then
+    local cleanId = selectedPreset:match("ID:%s*(%d+)")
+    if cleanId then
         _G.CrosshairSettings.ImageId = cleanId
     end
 end)
@@ -3139,9 +3150,9 @@ TabSpecial:CreateSlider("Max Coin Distance (Studs)", 50, 1000, Settings.CoinMaxD
     Settings.CoinMaxDistance = val
 end)
 
--- ========================================================
+-- ========================================================================
 -- [[ DYNAMIC ACTIVE PLAYER RETRIEVER LOGIC ]]
--- ========================================================
+-- ========================================================================
 local function GetPlayerNames()
     local names = {}
     for _, p in ipairs(Players:GetPlayers()) do
