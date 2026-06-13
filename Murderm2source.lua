@@ -1546,9 +1546,9 @@ local function FlingPlayer(targetPlayer)
     end
 end
 
--- ========================================================================
+-- ========================================================
 -- [[ FLING SHERIFF + GRAB GUN (UPDATED STEALTH TELEPORT) ]]
--- ========================================================================
+-- ========================================================
 local function SafeFlingSheriffAndGrab()
     local char = LocalPlayer.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -2450,17 +2450,52 @@ PreviewImage.Position = UDim2.new(0.5, -32.5, 0.5, -17.5)
 PreviewImage.BackgroundTransparency = 1
 PreviewImage.Visible = false
 
--- Dynamic updating function for visual crosshair real-time preview
+-- Object Pooling (Pre-create mockup preview frames to absolutely eliminate memory leaks and lag)
+local MockLines = {}
+for i = 1, 4 do
+    local line = Instance.new("Frame")
+    line.Name = "MockLine" .. i
+    line.AnchorPoint = Vector2.new(0.5, 0.5)
+    line.BorderSizePixel = 0
+    line.Visible = false
+    line.Parent = PreviewFrame
+    table.insert(MockLines, line)
+end
+
+local MockCircle = Instance.new("Frame")
+MockCircle.Name = "MockCircleFrame"
+MockCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+MockCircle.BackgroundTransparency = 1
+MockCircle.Visible = false
+MockCircle.Parent = PreviewFrame
+
+local MockCircleStroke = Instance.new("UIStroke")
+MockCircleStroke.Parent = MockCircle
+
+local MockCircleCorner = Instance.new("UICorner")
+MockCircleCorner.CornerRadius = UDim.new(1, 0)
+MockCircleCorner.Parent = MockCircle
+
+local MockDot = Instance.new("Frame")
+MockDot.Name = "MockDotFrame"
+MockDot.AnchorPoint = Vector2.new(0.5, 0.5)
+MockDot.BorderSizePixel = 0
+MockDot.Visible = false
+MockDot.Parent = PreviewFrame
+
+local MockDotCorner = Instance.new("UICorner")
+MockDotCorner.CornerRadius = UDim.new(1, 0)
+MockDotCorner.Parent = MockDot
+
+-- Lag-free update function utilizing pre-instantiated UI components
 local function UpdatePreviewBox()
     local config = _G.CrosshairSettings
     PreviewFrame.Visible = config.Enabled
     
-    -- Clear old vector lines inside the Preview Box
-    for _, child in ipairs(PreviewFrame:GetChildren()) do
-        if child.Name == "MockLine" or child.Name == "MockCircle" then
-            child:Destroy()
-        end
-    end
+    -- Fast hide all elements before updating properties
+    for _, line in ipairs(MockLines) do line.Visible = false end
+    MockCircle.Visible = false
+    MockDot.Visible = false
     PreviewImage.Visible = false
 
     if not config.Enabled then return end
@@ -2482,59 +2517,106 @@ local function UpdatePreviewBox()
         local thickness = math.clamp(config.Thickness, 1, 4)
         local centerPos = UDim2.new(0.5, 0, 0.5, 10)
         
-        local function CreateMockup(w, h, offset)
-            local frame = Instance.new("Frame")
-            frame.Name = "MockLine"
-            frame.AnchorPoint = Vector2.new(0.5, 0.5)
-            frame.Size = UDim2.new(0, w, 0, h)
-            frame.Position = centerPos + offset
-            frame.BackgroundColor3 = activeColor
-            frame.BorderSizePixel = 0
-            frame.Parent = PreviewFrame
+        if style == "Cross" then
+            -- Top Line
+            MockLines[1].Size = UDim2.new(0, thickness, 0, size)
+            MockLines[1].Position = centerPos + UDim2.new(0, 0, 0, -(gap + size/2))
+            MockLines[1].BackgroundColor3 = activeColor
+            MockLines[1].Visible = true
+            
+            -- Bottom Line
+            MockLines[2].Size = UDim2.new(0, thickness, 0, size)
+            MockLines[2].Position = centerPos + UDim2.new(0, 0, 0, (gap + size/2))
+            MockLines[2].BackgroundColor3 = activeColor
+            MockLines[2].Visible = true
+            
+            -- Left Line
+            MockLines[3].Size = UDim2.new(0, size, 0, thickness)
+            MockLines[3].Position = centerPos + UDim2.new(0, -(gap + size/2), 0, 0)
+            MockLines[3].BackgroundColor3 = activeColor
+            MockLines[3].Visible = true
+            
+            -- Right Line
+            MockLines[4].Size = UDim2.new(0, size, 0, thickness)
+            MockLines[4].Position = centerPos + UDim2.new(0, (gap + size/2), 0, 0)
+            MockLines[4].BackgroundColor3 = activeColor
+            MockLines[4].Visible = true
+            
+        elseif style == "T-Shape" then
+            -- Bottom Line
+            MockLines[1].Size = UDim2.new(0, thickness, 0, size)
+            MockLines[1].Position = centerPos + UDim2.new(0, 0, 0, (gap + size/2))
+            MockLines[1].BackgroundColor3 = activeColor
+            MockLines[1].Visible = true
+            
+            -- Left Line
+            MockLines[2].Size = UDim2.new(0, size, 0, thickness)
+            MockLines[2].Position = centerPos + UDim2.new(0, -(gap + size/2), 0, 0)
+            MockLines[2].BackgroundColor3 = activeColor
+            MockLines[2].Visible = true
+            
+            -- Right Line
+            MockLines[3].Size = UDim2.new(0, size, 0, thickness)
+            MockLines[3].Position = centerPos + UDim2.new(0, (gap + size/2), 0, 0)
+            MockLines[3].BackgroundColor3 = activeColor
+            MockLines[3].Visible = true
+            
+        elseif style == "Diamond" then
+            -- Set Cross lines with a 45 degree tilt to make a perfect Diamond
+            MockLines[1].Size = UDim2.new(0, thickness, 0, size)
+            MockLines[1].Position = centerPos + UDim2.new(0, 0, 0, -(gap + size/2))
+            MockLines[1].BackgroundColor3 = activeColor
+            MockLines[1].Visible = true
+            
+            MockLines[2].Size = UDim2.new(0, thickness, 0, size)
+            MockLines[2].Position = centerPos + UDim2.new(0, 0, 0, (gap + size/2))
+            MockLines[2].BackgroundColor3 = activeColor
+            MockLines[2].Visible = true
+            
+            MockLines[3].Size = UDim2.new(0, size, 0, thickness)
+            MockLines[3].Position = centerPos + UDim2.new(0, -(gap + size/2), 0, 0)
+            MockLines[3].BackgroundColor3 = activeColor
+            MockLines[3].Visible = true
+            
+            MockLines[4].Size = UDim2.new(0, size, 0, thickness)
+            MockLines[4].Position = centerPos + UDim2.new(0, (gap + size/2), 0, 0)
+            MockLines[4].BackgroundColor3 = activeColor
+            MockLines[4].Visible = true
+            
+            MockLines[1].Rotation = 45
+            MockLines[2].Rotation = 45
+            MockLines[3].Rotation = 45
+            MockLines[4].Rotation = 45
+        end
+        
+        -- Reset tilt rotations for other styles
+        if style ~= "Diamond" then
+            MockLines[1].Rotation = 0
+            MockLines[2].Rotation = 0
+            MockLines[3].Rotation = 0
+            MockLines[4].Rotation = 0
         end
 
-        if style == "Cross" then
-            CreateMockup(thickness, size, UDim2.new(0, 0, 0, -(gap + size/2)))
-            CreateMockup(thickness, size, UDim2.new(0, 0, 0, (gap + size/2)))
-            CreateMockup(size, thickness, UDim2.new(0, -(gap + size/2), 0, 0))
-            CreateMockup(size, thickness, UDim2.new(0, (gap + size/2), 0, 0))
-        elseif style == "T-Shape" then
-            CreateMockup(thickness, size, UDim2.new(0, 0, 0, (gap + size/2)))
-            CreateMockup(size, thickness, UDim2.new(0, -(gap + size/2), 0, 0))
-            CreateMockup(size, thickness, UDim2.new(0, (gap + size/2), 0, 0))
-        elseif style == "Circle" then
-            local circle = Instance.new("Frame")
-            circle.Name = "MockCircle"
-            circle.AnchorPoint = Vector2.new(0.5, 0.5)
-            circle.Size = UDim2.new(0, (size+gap)*2, 0, (size+gap)*2)
-            circle.Position = centerPos
-            circle.BackgroundTransparency = 1
-            circle.Parent = PreviewFrame
-            
-            local stroke = Instance.new("UIStroke", circle)
-            stroke.Color = activeColor
-            stroke.Thickness = thickness
-            
-            local corner = Instance.new("UICorner", circle)
-            corner.CornerRadius = UDim.new(1, 0)
+        if style == "Circle" then
+            MockCircle.Size = UDim2.new(0, (size+gap)*2, 0, (size+gap)*2)
+            MockCircle.Position = centerPos
+            MockCircleStroke.Color = activeColor
+            MockCircleStroke.Thickness = thickness
+            MockCircle.Visible = true
         elseif style == "Dot" then
-            local dot = Instance.new("Frame")
-            dot.Name = "MockCircle"
-            dot.AnchorPoint = Vector2.new(0.5, 0.5)
-            dot.Size = UDim2.new(0, thickness * 3, 0, thickness * 3)
-            dot.Position = centerPos
-            dot.BackgroundColor3 = activeColor
-            dot.BorderSizePixel = 0
-            dot.Parent = PreviewFrame
-            
-            local corner = Instance.new("UICorner", dot)
-            corner.CornerRadius = UDim.new(1, 0)
+            local dotRadius = math.clamp(thickness * 3, 4, 16)
+            MockDot.Size = UDim2.new(0, dotRadius, 0, dotRadius)
+            MockDot.Position = centerPos
+            MockDot.BackgroundColor3 = activeColor
+            MockDot.Visible = true
         end
     end
 end
 
 local fpsCount = 0
 local lastFpsTime = os.clock()
+local previewThrottle = 0
+
 SafeConnect(RunService.RenderStepped, function()
     fpsCount = fpsCount + 1
     local now = os.clock()
@@ -2550,8 +2632,11 @@ SafeConnect(RunService.RenderStepped, function()
         PingLabel.Text = "PING: " .. tostring(ping) .. " ms"
     end
 
-    -- Real-time synchronization for visual crosshair preview
-    pcall(UpdatePreviewBox)
+    -- Optimized throttling: Only update the Preview Frame 20 times per second instead of 60+ to eliminate lag
+    previewThrottle = (previewThrottle + 1) % 3
+    if previewThrottle == 0 then
+        pcall(UpdatePreviewBox)
+    end
 end)
 
 -- ========================================================
@@ -3150,9 +3235,9 @@ TabSpecial:CreateSlider("Max Coin Distance (Studs)", 50, 1000, Settings.CoinMaxD
     Settings.CoinMaxDistance = val
 end)
 
--- ========================================================================
+-- ========================================================
 -- [[ DYNAMIC ACTIVE PLAYER RETRIEVER LOGIC ]]
--- ========================================================================
+-- ========================================================
 local function GetPlayerNames()
     local names = {}
     for _, p in ipairs(Players:GetPlayers()) do
