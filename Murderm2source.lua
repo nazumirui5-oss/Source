@@ -41,6 +41,7 @@ local IsFlingingFromFarm = false
 local FlingDurationLeft = 12
 local lastShotTime = 0
 local lastTouchFlingState = false
+local IsGrabShooting = false
 
 -- ========================================================================
 -- [[ EXTERNAL BUTTON TEXT CUSTOMIZATION ]]
@@ -62,7 +63,8 @@ local ExtButtonTexts = {
     FlingGrab = "FS_GRAB",
     JumpBoost = "J_BOOST",
     SilentAim = "S_AIM",
-    FlingAll = "FLING_ALL"
+    FlingAll = "FLING_ALL",
+    GrabShoot = "G_SHOOT"
 }
 
 -- ========================================================================
@@ -184,7 +186,11 @@ local Settings = {
     FlingGrabTpDistance = 250, -- Distance limit slider for safety teleports
     AutoFlingAll = false, -- Auto Fling All Players setting
     FlingGrabTpMode = "Innocent", -- Safety teleport mode choice: "Innocent" or "Original Position"
-    AutoGrabAndShoot = false -- Auto Grab and Auto Shoot combined Sheriff flow
+    AutoGrabAndShoot = false, -- Auto Grab and Auto Shoot combined Sheriff flow
+    
+    -- New Settings
+    StretchResEnabled = false,
+    StretchResValue = 1.0
 }
 
 local OriginalFOV = Camera.FieldOfView
@@ -887,6 +893,91 @@ task.spawn(function()
     end
 end)
 
+-- ========================================================================
+-- [[ NEW FEATURE: GRAB dropped GUN + TELEPORT TO MURDER + AUTO SHOOT FLOW ]]
+-- ========================================================================
+local function GrabGunTeleportShoot()
+    if IsGrabShooting then return end
+    IsGrabShooting = true
+    
+    local activeGun = ScanForDroppedGun()
+    if not activeGun then
+        Library:Notify("Grab & Shoot", "No dropped gun found on map.", 2.5)
+        IsGrabShooting = false
+        return
+    end
+    
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    if not root or not humanoid or humanoid.Health <= 0 then
+        Library:Notify("Grab & Shoot", "Character not ready or dead.", 2)
+        IsGrabShooting = false
+        return
+    end
+    
+    local originalCFrame = root.CFrame
+    Library:Notify("Grab & Shoot", "Teleporting to dropped gun...", 1.5)
+    
+    -- Disable local collision during teleport/grab flow
+    local grabCollisionConn = RunService.Stepped:Connect(function()
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then part.CanCollide = false end
+            end
+        end
+    end)
+    
+    root.CFrame = activeGun.CFrame + Vector3.new(0, 1.5, 0)
+    
+    -- Wait for gun pickup (Timeout: 1.5s)
+    local grabbed = false
+    local startTime = os.clock()
+    while os.clock() - startTime < 1.5 do
+        local backpack = LocalPlayer:FindFirstChild("Backpack")
+        if char:FindFirstChild("Gun") or (backpack and backpack:FindFirstChild("Gun")) then
+            grabbed = true
+            break
+        end
+        root.CFrame = activeGun.CFrame + Vector3.new(0, 1.5, 0)
+        task.wait(0.05)
+    end
+    
+    if grabCollisionConn then grabCollisionConn:Disconnect() end
+    
+    if grabbed then
+        Library:Notify("Grab & Shoot", "Gun obtained! Searching for Murderer...", 1.5)
+        
+        local targetPlayer = GetTargetByRole("Murderer")
+        if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local targetRoot = targetPlayer.Character.HumanoidRootPart
+            
+            -- Teleport behind the Murderer
+            root.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+            task.wait(0.1)
+            
+            -- Auto Equip Gun
+            local gun = char:FindFirstChild("Gun") or (LocalPlayer:FindFirstChild("Backpack") and LocalPlayer.Backpack:FindFirstChild("Gun"))
+            if gun and gun.Parent == LocalPlayer:FindFirstChild("Backpack") then
+                humanoid:EquipTool(gun)
+                task.wait(0.08)
+            end
+            
+            -- Trigger instant Silent Aim bullet release
+            FireGunAtTarget()
+            Library:Notify("Grab & Shoot", "Shot successfully fired at Murderer!", 3)
+        else
+            Library:Notify("Grab & Shoot", "Murderer not found or already dead.", 2.5)
+            root.CFrame = originalCFrame
+        end
+    else
+        Library:Notify("Grab & Shoot", "Grab failed (senjata tidak merespon/timeout).", 2.5)
+        root.CFrame = originalCFrame
+    end
+    
+    IsGrabShooting = false
+end
+
 -- ========================================================
 -- [[ FEATURE 2 LOGIC: DOUBLE JUMP & INFINITE JUMP ]]
 -- ========================================================
@@ -1164,7 +1255,7 @@ local function CollectCoin(coinPart)
     local grabCFrame = coinPart.CFrame
 
     local distance = (root.Position - safeUnderCFrame.Position).Magnitude
-    local speed = Settings.CoinFarmTweenSpeed or 90
+    local speed = Settings.CoinUpTweenSpeed or 90
     local tweenTime = distance / speed
     
     root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
@@ -1886,41 +1977,42 @@ SafeConnect(RunService.Heartbeat, LPH_NO_VIRTUALIZE(function()
                 end
             end
         end
-
-        if Settings.TouchFling then
-            lastTouchFlingState = true
-            local multiplier = Settings.FlingPower * 1000
-            originalVelocity = root.AssemblyLinearVelocity
-            originalRotVelocity = root.AssemblyAngularVelocity
-            
-            root.AssemblyLinearVelocity = Vector3.new(multiplier, multiplier, multiplier)
-            root.AssemblyAngularVelocity = Vector3.new(0, multiplier, 0)
-        else
-            -- Fix Touch Fling Self-Fling Glitch: Zeroes velocity when disabled to stabilize player physics
-            if lastTouchFlingState then
-                lastTouchFlingState = false
-                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-            end
-        end
     end
 end))
 
-SafeConnect(RunService.RenderStepped, LPH_NO_VIRTUALIZE(function()
-    local char = LocalPlayer.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if root then
-        if Settings.TouchFling then
-            root.AssemblyLinearVelocity = originalVelocity
-            root.AssemblyAngularVelocity = originalRotVelocity
-        else
-            if lastTouchFlingState then
-                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+-- ========================================================
+-- [[ FIX COMPLETED: TOUCH FLING PULSE ENGINE (NO SELF-FLING) ]]
+-- ========================================================
+task.spawn(function()
+    while true do
+        task.wait(0.01) -- High frequency touch check loop
+        if Settings.TouchFling and LocalPlayer.Character then
+            local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if root then
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player ~= LocalPlayer and player.Character then
+                        local tRoot = player.Character:FindFirstChild("HumanoidRootPart")
+                        local tHum = player.Character:FindFirstChildOfClass("Humanoid")
+                        if tRoot and tHum and tHum.Health > 0 then
+                            local dist = (root.Position - tRoot.Position).Magnitude
+                            if dist <= 4.0 then -- On Collision Distance
+                                -- Spike velocity directly to 10 Million instantly flinging the target on hit
+                                local flingVal = 10000000
+                                root.AssemblyLinearVelocity = Vector3.new(flingVal, flingVal, flingVal)
+                                root.AssemblyAngularVelocity = Vector3.new(0, flingVal, 0)
+                                task.wait(0.02) -- Short physics pulse frame
+                                -- Instant rest stabilization back to normal so your local character does not glitch
+                                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                                root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                                task.wait(0.1) -- Minimal safe cooldown before next impact
+                            end
+                        end
+                    end
+                end
             end
         end
     end
-end))
+end)
 
 task.spawn(function()
     while true do
@@ -2316,6 +2408,15 @@ SafeConnect(RunService.RenderStepped, LPH_NO_VIRTUALIZE(function()
                 ActiveTracers[Player.Name].Visible = false
             end
         end
+    end
+end))
+
+-- ========================================================================
+-- [[ NEW IMPLEMENTATION: STRETCHED RESOLUTION CAMERA ENGINE ]]
+-- ========================================================================
+SafeConnect(RunService.RenderStepped, LPH_NO_VIRTUALIZE(function()
+    if Settings.StretchResEnabled and Settings.StretchResValue then
+        Camera.CFrame = Camera.CFrame * CFrame.new(0, 0, 0, 1, 0, 0, 0, Settings.StretchResValue, 0, 0, 0, 1)
     end
 end))
 
@@ -2769,6 +2870,12 @@ local ExtFlingAllBtn = Library:CreateExternalButton("FlingAll", ExtButtonTexts.F
 end)
 RegisterExternalButton(ExtFlingAllBtn)
 
+-- NEW: Grab Gun + Teleport Murder + Instant Auto Shoot External Floating Button
+local ExtGrabShootBtn = Library:CreateExternalButton("GrabShoot", ExtButtonTexts.GrabShoot, UDim2.new(0, 220, 0.5, -10), function()
+    GrabGunTeleportShoot()
+end)
+RegisterExternalButton(ExtGrabShootBtn)
+
 ExtAimbotBtn:SetVisible(false)
 ExtGrabBtn:SetVisible(false)
 ExtDoubleJumpBtn:SetVisible(false)
@@ -2786,6 +2893,7 @@ ExtFlingGrabBtn:SetVisible(false)
 ExtJumpBoostBtn:SetVisible(false)
 ExtSilentAimBtn:SetVisible(false)
 ExtFlingAllBtn:SetVisible(false)
+ExtGrabShootBtn:SetVisible(false)
 
 -- ========================================================================
 -- [[ MAIN MENU STRUCTURE ]]
@@ -2862,18 +2970,6 @@ end
 TabCombat:CreateParagraph("Touch Fling (Collision System)", "Instant physical rotation style when character touches the enemy.")
 local TouchFlingToggle = TabCombat:CreateToggle("Activate Touch Fling", false, function(state)
     Settings.TouchFling = state
-    if not state then
-        task.spawn(function()
-            for i = 1, 5 do
-                local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if root then
-                    root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                    root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-                end
-                task.wait(0.02)
-            end
-        end)
-    end
 end)
 
 TabCombat:CreateSlider("Fling Velocity Power multiplier", 1, 200, Settings.FlingPower, function(val)
@@ -2956,6 +3052,16 @@ end)
 -- --- TAB 3: VISUAL & ESP ---
 local TabVisuals = Window:CreateTab("Visual Hacks", "rbxassetid://4483345998")
 
+-- NEW FEATURE: STRETCHED RESOLUTION CONTROLS
+TabVisuals:CreateParagraph("Stretched Resolution", "Modify camera perspective to simulate a stretched monitor viewport.")
+TabVisuals:CreateToggle("Enable Stretched Resolution", false, function(state)
+    Settings.StretchResEnabled = state
+end)
+
+TabVisuals:CreateSlider("Stretch Ratio (0.1 - 1.5)", 1, 15, 10, function(val)
+    Settings.StretchResValue = val / 10 -- Converted internally: Slider values 1 to 15 represent 0.1 to 1.5 ratio
+end)
+
 TabVisuals:CreateToggle("Activate Esp Outline + Drop Gun Outline", false, function(state)
     Settings.ESP = state
     if not state then ClearGunOutlines() end
@@ -3004,7 +3110,7 @@ TabVisuals:CreateSlider("Hitbox Size Modifier", 2, 100, Settings.HitboxSize, fun
 end)
 
 -- ========================================================
--- [[ CUSTOM CROSSHAIR INTERFACE INTEGRATION (ENGLISH) ]]
+-- [[ CUSTOM CROSSHAIR INTERFACE INTEGRATION ]]
 -- ========================================================
 TabVisuals:CreateParagraph("Custom Screen Crosshair", "Custom screen crosshair overlay supporting rotatable vectors and multiple Image ID presets.")
 
@@ -3224,7 +3330,7 @@ TabSpecial:CreateSlider("Fling Murderer Timer (Minutes)", 1, 5, Settings.CoinFar
 end)
 
 TabSpecial:CreateSlider("Coin Farm Tween Speed", 20, 90, Settings.CoinFarmTweenSpeed, function(val)
-    Settings.CoinFarmTweenSpeed = val
+    Settings.CoinUpTweenSpeed = val
 end)
 
 TabSpecial:CreateSlider("Coin Up Tween Speed", 10, 150, Settings.CoinUpTweenSpeed, function(val)
@@ -3305,6 +3411,19 @@ TabSpecial:CreateButton("Instant Teleport to Selected Target Character", functio
     else
         Library:Notify("Error", "Select a target character from the dropdown above first!", 2.5)
     end
+end)
+
+-- ========================================================
+-- [[ NEW FEATURE SECTION: GRAB GUN + AUTO SHOOT FLOW ]]
+-- ========================================================
+TabSpecial:CreateParagraph("Grab and Shoot Sheriff Flow", "Grab dropped gun on map, teleport immediately to Murderer, and instantly auto-shoot using Silent Aim.")
+
+TabSpecial:CreateButton("Grab Dropped Gun & Instant Shoot Murderer", function()
+    GrabGunTeleportShoot()
+end)
+
+TabSpecial:CreateToggle("Show Grab & Shoot Button [GS]", false, function(state)
+    ExtGrabShootBtn:SetVisible(state)
 end)
 
 TabSpecial:CreateParagraph("Fling Glitches", "Violent rotation engine designed to push physical targets.")
@@ -3468,83 +3587,15 @@ TabControls:CreateSlider("Silent Aim Button Scale", 10, 200, 100, function(val)
     SetButtonSize(ExtSilentAimBtn, val / 100)
 end)
 
-TabControls:CreateSlider("Auto Fling All Button Scale", 10, 200, 100, function(val)
+TabControls:CreateSlider("Fling All Button Scale", 10, 200, 100, function(val)
     SetButtonSize(ExtFlingAllBtn, val / 100)
 end)
 
-TabControls:CreateParagraph("Window Lock", "Lock window dragging positions.")
-TabControls:CreateToggle("Lock Main UI Dragging", false, function(state)
-    Window:SetDragLock(state)
+TabControls:CreateSlider("Grab & Shoot Button Scale", 10, 200, 100, function(val)
+    SetButtonSize(ExtGrabShootBtn, val / 100)
+end)
+
+TabControls:CreateToggle("Lock Floating Buttons Dragging", false, function(state)
+    Settings.DragLocked = state
     UpdateAllButtonsDragLock(state)
 end)
-
--- --- TAB 7: CONFIGURATIONS ---
-local TabConfig = Window:CreateTab("Configurations", "rbxassetid://6023426915")
-
-TabConfig:CreateParagraph("Configuration Manager", "Manually save or load your configuration settings at any time.")
-
-TabConfig:CreateButton("Save Config Now", function()
-    Library:SaveConfig()
-end)
-
-TabConfig:CreateButton("Load Config Now", function()
-    Library:LoadConfig()
-end)
-
--- ========================================================
--- [[ RESPONDERS SYSTEM & EVENT CONNECTIONS (PERSISTENCE) ]]
--- ========================================================
-_G.SyncFlingButtons = function()
-    Library:Notify("Fling Update", "States updated.", 1.2)
-end
-
-if LocalPlayer.Character then
-    pcall(SetupDoubleJump, LocalPlayer.Character)
-end
-
-SafeConnect(LocalPlayer.CharacterAdded, function(char)
-    pcall(SetupDoubleJump, char)
-    
-    WasUnderground = false
-    PreFarmCFrame = nil
-    CachedCoinContainer = nil
-    CollectedCoinsCount = 0
-    IsFlingingFromFarm = false
-    CoinFarmTimeLeft = Settings.CoinFarmTimerValue * 60
-    
-    local humanoid = char:WaitForChild("Humanoid")
-    task.wait(0.5)
-    
-    if Settings.SpeedWalkEnabled then humanoid.WalkSpeed = Settings.SpeedWalkValue end
-    if Settings.JumpPowerEnabled then
-        humanoid.UseJumpPower = true
-        humanoid.JumpPower = Settings.JumpPowerValue
-    end
-    if Settings.FlyEnabled then UpdateFlyState(true) end
-    if Settings.SpinEnabled then UpdateSpinState(true) end
-end)
-
--- Keyboard Quick Keybind Connection
-SafeConnect(UserInputService.InputBegan, function(input, gameProcessed)
-    if gameProcessed then return end
-    local key = input.KeyCode
-    if key == Enum.KeyCode.Q then
-        Settings.CameraAimbot = not Settings.CameraAimbot
-        Library:Notify("Aimbot Assist", "Status: " .. (Settings.CameraAimbot and "ON" or "OFF"), 1.5)
-    elseif key == Enum.KeyCode.X then
-        Settings.ESP = not Settings.ESP
-        Library:Notify("Visuals Toggle", "Status: " .. (Settings.ESP and "ON" or "OFF"), 1.5)
-        if not Settings.ESP then ClearGunOutlines() end
-    elseif key == Enum.KeyCode.C then
-        Settings.HitboxExpander = not Settings.HitboxExpander
-        Library:Notify("Hitbox Expander", "Status: " .. (Settings.HitboxExpander and "ON" or "OFF"), 1.5)
-    elseif key == Enum.KeyCode.H then
-        Settings.AutoGrabGun = not Settings.AutoGrabGun
-        Library:Notify("Auto Grab Gun", "Status: " .. (Settings.AutoGrabGun and "ON" or "OFF"), 1.5)
-    elseif key == Enum.KeyCode.P then
-        Settings.HideFOVCircle = not Settings.HideFOVCircle
-        Library:Notify("FOV Visibility", "Status: " .. (Settings.HideFOVCircle and "Hidden" or "Visible"), 1.5)
-    end
-end)
-
-print("[LOUIS HUB]: MM2 Loader Ready to Use.")
