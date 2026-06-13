@@ -203,7 +203,9 @@ _G.CrosshairSettings = {
     ImageId = "6877713475",
     Rotation = 0,
     AutoSpin = false,
-    SpinSpeed = 50
+    SpinSpeed = 50,
+    OnlyShiftLock = false,
+    HideDefaultCursor = true
 }
 _G.CrosshairLoaded = false
 
@@ -2404,6 +2406,123 @@ PingLabel.TextColor3 = Color3.fromRGB(0, 180, 255)
 PingLabel.Text = "PING: -- ms"
 PingLabel.Parent = HudFrame
 
+-- ========================================================
+-- [[ KOTAK PRATINJAU VISUAL CROSSHAIR (PREVIEW BOX) ]]
+-- ========================================================
+local PreviewFrame = Instance.new("Frame")
+PreviewFrame.Size = UDim2.new(0, 110, 0, 110)
+PreviewFrame.Position = UDim2.new(1, -125, 0.5, 30) -- Positioned directly beneath FPS & Ping stats
+PreviewFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
+PreviewFrame.BackgroundTransparency = 0.4
+PreviewFrame.BorderSizePixel = 0
+PreviewFrame.Visible = false -- Dynamically shown when Custom Crosshair is enabled
+PreviewFrame.Parent = HudGui
+
+local PreviewCorner = Instance.new("UICorner", PreviewFrame)
+PreviewCorner.CornerRadius = UDim.new(0, 6)
+
+local PreviewStroke = Instance.new("UIStroke", PreviewFrame)
+PreviewStroke.Color = Color3.fromRGB(35, 35, 35)
+PreviewStroke.Thickness = 1
+
+local PreviewTitle = Instance.new("TextLabel", PreviewFrame)
+PreviewTitle.Size = UDim2.new(1, 0, 0, 20)
+PreviewTitle.Position = UDim2.new(0, 0, 0, 4)
+PreviewTitle.BackgroundTransparency = 1
+PreviewTitle.Font = Enum.Font.GothamSemibold
+PreviewTitle.TextSize = 8
+PreviewTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
+PreviewTitle.Text = "VISUAL PREVIEW"
+
+local PreviewImage = Instance.new("ImageLabel", PreviewFrame)
+PreviewImage.Size = UDim2.new(0, 65, 0, 65)
+PreviewImage.Position = UDim2.new(0.5, -32.5, 0.5, -17.5)
+PreviewImage.BackgroundTransparency = 1
+PreviewImage.Visible = false
+
+-- Dynamic updating function for visual crosshair real-time preview
+local function UpdatePreviewBox()
+    local config = _G.CrosshairSettings
+    PreviewFrame.Visible = config.Enabled
+    
+    -- Clear old vector lines inside the Preview Box
+    for _, child in ipairs(PreviewFrame:GetChildren()) do
+        if child.Name == "MockLine" or child.Name == "MockCircle" then
+            child:Destroy()
+        end
+    end
+    PreviewImage.Visible = false
+
+    if not config.Enabled then return end
+    
+    local activeColor = config.Rainbow and Color3.fromHSV((os.clock() % 4) / 4, 1, 1) or config.Color
+    local style = config.Style
+    
+    if style == "Image" then
+        local cleanId = tostring(config.ImageId):gsub("%D", "")
+        if cleanId ~= "" then
+            PreviewImage.Image = "rbxthumb://type=Asset&id=" .. cleanId .. "&w=150&h=150"
+            PreviewImage.ImageColor3 = activeColor
+            PreviewImage.Rotation = config.AutoSpin and (os.clock() * config.SpinSpeed) % 360 or config.Rotation
+            PreviewImage.Visible = true
+        end
+    else
+        local size = math.clamp(config.Size, 4, 25)
+        local gap = math.clamp(config.Gap, 1, 15)
+        local thickness = math.clamp(config.Thickness, 1, 4)
+        local centerPos = UDim2.new(0.5, 0, 0.5, 10)
+        
+        local function CreateMockup(w, h, offset)
+            local frame = Instance.new("Frame")
+            frame.Name = "MockLine"
+            frame.AnchorPoint = Vector2.new(0.5, 0.5)
+            frame.Size = UDim2.new(0, w, 0, h)
+            frame.Position = centerPos + offset
+            frame.BackgroundColor3 = activeColor
+            frame.BorderSizePixel = 0
+            frame.Parent = PreviewFrame
+        end
+
+        if style == "Cross" then
+            CreateMockup(thickness, size, UDim2.new(0, 0, 0, -(gap + size/2)))
+            CreateMockup(thickness, size, UDim2.new(0, 0, 0, (gap + size/2)))
+            CreateMockup(size, thickness, UDim2.new(0, -(gap + size/2), 0, 0))
+            CreateMockup(size, thickness, UDim2.new(0, (gap + size/2), 0, 0))
+        elseif style == "T-Shape" then
+            CreateMockup(thickness, size, UDim2.new(0, 0, 0, (gap + size/2)))
+            CreateMockup(size, thickness, UDim2.new(0, -(gap + size/2), 0, 0))
+            CreateMockup(size, thickness, UDim2.new(0, (gap + size/2), 0, 0))
+        elseif style == "Circle" then
+            local circle = Instance.new("Frame")
+            circle.Name = "MockCircle"
+            circle.AnchorPoint = Vector2.new(0.5, 0.5)
+            circle.Size = UDim2.new(0, (size+gap)*2, 0, (size+gap)*2)
+            circle.Position = centerPos
+            circle.BackgroundTransparency = 1
+            circle.Parent = PreviewFrame
+            
+            local stroke = Instance.new("UIStroke", circle)
+            stroke.Color = activeColor
+            stroke.Thickness = thickness
+            
+            local corner = Instance.new("UICorner", circle)
+            corner.CornerRadius = UDim.new(1, 0)
+        elseif style == "Dot" then
+            local dot = Instance.new("Frame")
+            dot.Name = "MockCircle"
+            dot.AnchorPoint = Vector2.new(0.5, 0.5)
+            dot.Size = UDim2.new(0, thickness * 3, 0, thickness * 3)
+            dot.Position = centerPos
+            dot.BackgroundColor3 = activeColor
+            dot.BorderSizePixel = 0
+            dot.Parent = PreviewFrame
+            
+            local corner = Instance.new("UICorner", dot)
+            corner.CornerRadius = UDim.new(1, 0)
+        end
+    end
+end
+
 local fpsCount = 0
 local lastFpsTime = os.clock()
 SafeConnect(RunService.RenderStepped, function()
@@ -2420,6 +2539,9 @@ SafeConnect(RunService.RenderStepped, function()
         end)
         PingLabel.Text = "PING: " .. tostring(ping) .. " ms"
     end
+
+    -- Real-time synchronization for visual crosshair preview
+    pcall(UpdatePreviewBox)
 end)
 
 -- ========================================================
@@ -2804,10 +2926,18 @@ TabVisuals:CreateToggle("Enable Custom Crosshair", false, function(state)
             end)
             if not success then
                 _G.CrosshairLoaded = false
-                Library:Notify("Crosshair Error", "Failed to load crosshair module.", 3)
+                Library:Notify("Crosshair Error", "Failed to download crosshair module.", 3)
             end
         end)
     end
+end)
+
+TabVisuals:CreateToggle("Show Only When Shift Lock is On", false, function(state)
+    _G.CrosshairSettings.OnlyShiftLock = state
+end)
+
+TabVisuals:CreateToggle("Hide Roblox Default Cursor", true, function(state)
+    _G.CrosshairSettings.HideDefaultCursor = state
 end)
 
 TabVisuals:CreateDropdown("Crosshair Style", {"Cross", "T-Shape", "Diamond", "Circle", "Dot", "Image"}, "Cross", function(selected)
@@ -2852,7 +2982,7 @@ TabVisuals:CreateSlider("Crosshair Thickness", 1, 6, 2, function(val)
     _G.CrosshairSettings.Thickness = val / 1.3
 end)
 
-TabVisuals:CreateParagraph("Crosshair Rotation Controls", "Rotate the vector shapes or image presets manually or continuously with speed configurations.")
+TabVisuals:CreateParagraph("Crosshair Rotation Controls", "Adjust manual rotation angle or enable Auto-Spin mode for all styles.")
 
 TabVisuals:CreateSlider("Manual Rotation Angle", 0, 360, 0, function(val)
     _G.CrosshairSettings.Rotation = val
@@ -3009,9 +3139,9 @@ TabSpecial:CreateSlider("Max Coin Distance (Studs)", 50, 1000, Settings.CoinMaxD
     Settings.CoinMaxDistance = val
 end)
 
--- ========================================================================
+-- ========================================================
 -- [[ DYNAMIC ACTIVE PLAYER RETRIEVER LOGIC ]]
--- ========================================================================
+-- ========================================================
 local function GetPlayerNames()
     local names = {}
     for _, p in ipairs(Players:GetPlayers()) do
@@ -3265,9 +3395,9 @@ TabConfig:CreateButton("Load Config Now", function()
     Library:LoadConfig()
 end)
 
--- ========================================================================
+-- ========================================================
 -- [[ RESPONDERS SYSTEM & EVENT CONNECTIONS (PERSISTENCE) ]]
--- ========================================================================
+-- ========================================================
 _G.SyncFlingButtons = function()
     Library:Notify("Fling Update", "States updated.", 1.2)
 end
