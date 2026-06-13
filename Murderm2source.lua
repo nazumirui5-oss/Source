@@ -1,3 +1,8 @@
+Here is the complete, unaltered, and fully updated script for Core(mm2).txt
+(File 1). The setup for the custom crosshair presets, variables, and the entire
+English configuration UI panel has been integrated into TabVisuals (Visual
+Hacks) without omitting any of your original features or logic [1].
+
 -- ========================================================================
 -- [[ LOUIS HUB - MM2 FUNCTIONAL EDITION (INTEGRATED & OPTIMIZED) ]]
 -- ========================================================================
@@ -67,7 +72,7 @@ local ExtButtonTexts = {
 
 -- ========================================================================
 -- [[ EXTERNAL UTILITY BUTTONS & SCALE ENGINE ]]
--- ========================================================
+-- ========================================================================
 local ExternalButtonsList = {}
 
 local function RegisterExternalButton(btnWrapper)
@@ -188,6 +193,54 @@ local Settings = {
 }
 
 local OriginalFOV = Camera.FieldOfView
+
+-- ========================================================
+-- [[ DYNAMIC CUSTOM CROSSHAIR STATE & PRESETS ]]
+-- ========================================================
+_G.CrosshairSettings = {
+    Enabled = false,
+    Style = "Cross",
+    Size = 10,
+    Gap = 5,
+    Thickness = 1.5,
+    Color = Color3.fromRGB(0, 255, 150),
+    Rainbow = false,
+    ImageId = "6877713475",
+    Rotation = 0,
+    AutoSpin = false,
+    SpinSpeed = 50
+}
+_G.CrosshairLoaded = false
+
+local PresetNames = {
+    "Preset 1 (ID: 6877713475)", "Preset 2 (ID: 11767039030)", "Preset 3 (ID: 11763581182)",
+    "Preset 4 (ID: 11816181606)", "Preset 5 (ID: 11816262829)", "Preset 6 (ID: 11894211724)",
+    "Preset 7 (ID: 11903012166)", "Preset 8 (ID: 12308297405)", "Preset 9 (ID: 13515759440)",
+    "Preset 10 (ID: 13561401101)", "Preset 11 (ID: 13413721933)", "Preset 12 (ID: 12952422567)",
+    "Preset 13 (ID: 12789524132)", "Preset 14 (ID: 12681078223)", "Preset 15 (ID: 12403457353)",
+    "Preset 16 (ID: 17665878559)", "Preset 17 (ID: 11863480747)", "Preset 18 (ID: 11958213641)",
+    "Preset 19 (ID: 17117394116)", "Preset 20 (ID: 10879103438)", "Preset 21 (ID: 12099552082)",
+    "Preset 22 (ID: 12645685438)", "Preset 23 (ID: 13187494895)", "Preset 24 (ID: 14165283181)",
+    "Preset 25 (ID: 14196151488)", "Preset 26 (ID: 14175340156)", "Preset 27 (ID: 15064835974)",
+    "Preset 28 (ID: 11717828334)", "Preset 29 (ID: 11770890261)", "Preset 30 (ID: 12436450999)",
+    "Preset 31 (ID: 14828905230)", "Preset 32 (ID: 5112357171)", "Preset 33 (ID: 8351520948)",
+    "Preset 34 (ID: 12294092863)", "Preset 35 (ID: 11746881057)", "Preset 36 (ID: 11756692092)",
+    "Preset 37 (ID: 11763243469)", "Preset 38 (ID: 12077205402)", "Preset 39 (ID: 12146988029)",
+    "Preset 40 (ID: 2366671460)", "Preset 41 (ID: 11915618919)", "Preset 42 (ID: 10164277641)",
+    "Preset 43 (ID: 4818758746)", "Preset 44 (ID: 11720549778)", "Preset 45 (ID: 15963047794)",
+    "Preset 46 (ID: 13413667445)", "Preset 47 (ID: 12323570810)", "Preset 48 (ID: 16004319201)",
+    "Preset 49 (ID: 9126971642)", "Preset 50 (ID: 6848903054)"
+}
+
+local CrosshairColorPresets = {
+    ["Green (Neon)"] = Color3.fromRGB(0, 255, 150),
+    ["Red"] = Color3.fromRGB(255, 75, 75),
+    ["Blue"] = Color3.fromRGB(0, 150, 255),
+    ["White"] = Color3.fromRGB(255, 255, 255),
+    ["Yellow"] = Color3.fromRGB(255, 220, 0),
+    ["Cyan"] = Color3.fromRGB(0, 255, 255),
+    ["Pink"] = Color3.fromRGB(255, 100, 200)
+}
 
 -- ========================================================
 -- [[ RE-EXECUTION CLEANUP SYSTEM ]]
@@ -769,8 +822,8 @@ pcall(function()
                             args[2] = (targetPart.Position - args[1]).Unit * 1000
                             return oldNamecall(self, unpack(args))
                         elseif method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRay" then
-                            local ray = args[1]
-                            args[1] = Ray.new(ray.Origin, (targetPart.Position - ray.Origin).Unit * 1000)
+                            local r = args[1]
+                            args[1] = Ray.new(r.Origin, (targetPart.Position - r.Origin).Unit * 1000)
                             return oldNamecall(self, unpack(args))
                         end
                     end
@@ -2259,9 +2312,9 @@ SafeConnect(RunService.RenderStepped, LPH_NO_VIRTUALIZE(function()
     end
 end))
 
--- ========================================================================
+-- ========================================================
 -- [[ EARLY ROLE DETECTION (BACKPACK & CHAR LISTENER) ]]
--- ========================================================================
+-- ========================================================
 local function MonitorRolesForEarlyDetect(player)
     if player == LocalPlayer then return end
     
@@ -2736,6 +2789,86 @@ end)
 
 TabVisuals:CreateSlider("Hitbox Size Modifier", 2, 100, Settings.HitboxSize, function(val)
     Settings.HitboxSize = val
+end)
+
+-- ========================================================
+-- [[ CUSTOM CROSSHAIR INTERFACE INTEGRATION (ENGLISH) ]]
+-- ========================================================
+TabVisuals:CreateParagraph("Custom Screen Crosshair", "Custom screen crosshair overlay supporting rotatable vectors and multiple Image ID presets.")
+
+TabVisuals:CreateToggle("Enable Custom Crosshair", false, function(state)
+    _G.CrosshairSettings.Enabled = state
+    
+    if state and not _G.CrosshairLoaded then
+        _G.CrosshairLoaded = true
+        task.spawn(function()
+            local url = "https://raw.githubusercontent.com/nazumirui5-oss/Ui-Library/refs/heads/main/crosshair.lua"
+            
+            local success, err = pcall(function()
+                loadstring(game:HttpGet(url))()
+            end)
+            if not success then
+                _G.CrosshairLoaded = false
+                Library:Notify("Crosshair Error", "Failed to load crosshair module.", 3)
+            end
+        end)
+    end
+end)
+
+TabVisuals:CreateDropdown("Crosshair Style", {"Cross", "T-Shape", "Diamond", "Circle", "Dot", "Image"}, "Cross", function(selected)
+    _G.CrosshairSettings.Style = selected
+end)
+
+TabVisuals:CreateDropdown("Select Preset Image ID", PresetNames, PresetNames[1], function(selectedPreset)
+    local cleanId = selectedPreset:gsub("%D", "")
+    if cleanId ~= "" then
+        _G.CrosshairSettings.ImageId = cleanId
+    end
+end)
+
+TabVisuals:CreateTextBox("Custom Image ID", "Enter Image Asset ID manually...", function(text)
+    local cleanId = text:gsub("%D", "")
+    if cleanId ~= "" then
+        _G.CrosshairSettings.ImageId = cleanId
+        Library:Notify("Crosshair ID", "ID updated manually to: " .. cleanId, 1.5)
+    end
+end)
+
+TabVisuals:CreateDropdown("Crosshair Color Preset", {"Green (Neon)", "Red", "Blue", "White", "Yellow", "Cyan", "Pink"}, "Green (Neon)", function(selectedName)
+    local targetColor = CrosshairColorPresets[selectedName]
+    if targetColor then
+        _G.CrosshairSettings.Color = targetColor
+    end
+end)
+
+TabVisuals:CreateToggle("Rainbow Crosshair Effect", false, function(state)
+    _G.CrosshairSettings.Rainbow = state
+end)
+
+TabVisuals:CreateSlider("Crosshair Size / Radius", 2, 35, 10, function(val)
+    _G.CrosshairSettings.Size = val
+end)
+
+TabVisuals:CreateSlider("Crosshair Gap Size", 0, 25, 5, function(val)
+    _G.CrosshairSettings.Gap = val
+end)
+
+TabVisuals:CreateSlider("Crosshair Thickness", 1, 6, 2, function(val)
+    _G.CrosshairSettings.Thickness = val / 1.3
+end)
+
+TabVisuals:CreateParagraph("Crosshair Rotation Controls", "Rotate the vector shapes or image presets manually or continuously with speed configurations.")
+
+TabVisuals:CreateSlider("Manual Rotation Angle", 0, 360, 0, function(val)
+    _G.CrosshairSettings.Rotation = val
+end)
+
+TabVisuals:CreateToggle("Auto-Spin Crosshair", false, function(state)
+    _G.CrosshairSettings.AutoSpin = state
+end)
+
+TabVisuals:CreateSlider("Auto-Spin Speed", 10, 200, 50, function(val)
+    _G.CrosshairSettings.SpinSpeed = val
 end)
 
 -- --- TAB 4: MOVEMENT & UTILITY ---
