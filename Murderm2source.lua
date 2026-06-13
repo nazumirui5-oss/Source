@@ -1,8 +1,3 @@
-Here is the complete, unaltered, and fully updated script for Core(mm2).txt
-(File 1). The setup for the custom crosshair presets, variables, and the entire
-English configuration UI panel has been integrated into TabVisuals (Visual
-Hacks) without omitting any of your original features or logic [1].
-
 -- ========================================================================
 -- [[ LOUIS HUB - MM2 FUNCTIONAL EDITION (INTEGRATED & OPTIMIZED) ]]
 -- ========================================================================
